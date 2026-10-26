@@ -11,7 +11,7 @@ rules_version = '2';
 //  so keep both apps' sections in this one file.
 //
 //  To-do data layout
-//    users/{uid}                         profile, the list you had open last, your favourite lists
+//    users/{uid}                         profile, the list you had open last, your favourite lists, your list order
 //    lists/{listId}                      title, owner, and who it's shared with:
 //        roles:        { "friend@mail.com": "read" | "comment" | "write" | "readwrite" }
 //        memberEmails: [ "friend@mail.com", ... ]   (same emails, for searching)
@@ -137,9 +137,11 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, delete: if signedIn() && request.auth.uid == uid;
       allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'listOrder', 'createdAt', 'updatedAt'])
         && request.resource.data.get('favorites', []) is list
-        && request.resource.data.get('favorites', []).size() <= 500;
+        && request.resource.data.get('favorites', []).size() <= 500
+        && request.resource.data.get('listOrder', []) is list
+        && request.resource.data.get('listOrder', []).size() <= 500;
     }
 
     // ---------- lists ----------
