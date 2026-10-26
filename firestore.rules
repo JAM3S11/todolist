@@ -1,0 +1,267 @@
+rules_version = '2';
+
+// =====================================================================
+//  Firestore rules for this project. Two apps share it:
+//    1. The graduation site: messages, wall-messages, speeches, rsvps,
+//       graduationPhotos, aspirations, afterparty_waitlist
+//    2. Shared To-Do Lists: users, lists (+ tasks, comments), invites, mail
+//
+//  Paste this whole file into Firebase console → Firestore Database → Rules,
+//  or run `npm run deploy:rules`. Either way it replaces the published rules,
+//  so keep both apps' sections in this one file.
+//
+//  To-do data layout
+//    users/{uid}                         profile, the list you had open last, your favourite lists
+//    lists/{listId}                      title, owner, and who it's shared with:
+//        roles:        { "friend@mail.com": "read" | "comment" | "write" | "readwrite" }
+//        memberEmails: [ "friend@mail.com", ... ]   (same emails, for searching)
+//        leftEmails:   [ "gone@mail.com", ... ]     (left on their own; shown to the owner until re-shared)
+//    lists/{listId}/tasks/{taskId}
+//    lists/{listId}/comments/{commentId}
+//    invites/{listId_email}              in-app "shared with you" notification for one person
+//    mail/{id}                           optional invitation emails (Trigger Email extension)
+// =====================================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // =================================================================
+    //  EXISTING APP (graduation site) — unchanged
+    // =================================================================
+
+    // Contact form submissions — anyone can create, only admins can read
+    match /messages/{docId} {
+      allow create: if true;
+      allow read, update, delete: if false;
+    }
+
+    // Memory wall — anyone can read, create, and update (for likes)
+    match /wall-messages/{docId} {
+      allow read: if true;
+      allow create: if request.resource.data.sender is string
+                    && request.resource.data.message is string;
+      allow update: if request.resource.data.diff(resource.data).affectedKeys()
+                      .hasOnly(['reactions']);
+      allow delete: if false;
+    }
+
+    // Speeches — auth required for writes, field validation on create
+    match /speeches/{docId} {
+      allow read: if true;
+      allow create: if request.auth != null
+                    && request.resource.data.keys().hasAll(['recipient', 'title', 'initialText', 'createdAt'])
+                    && request.resource.data.recipient is string
+                    && request.resource.data.title is string
+                    && request.resource.data.initialText is string;
+      allow update: if request.auth != null
+                    && request.resource.data.keys().hasAny(['recipient', 'title', 'relation', 'initialText', 'timeEstimate', 'avatarColor', 'icon', 'updatedAt']);
+      allow delete: if request.auth != null;
+    }
+
+    // RSVP — anyone can create, public read
+    match /rsvps/{docId} {
+      allow read: if true;
+      allow create: if request.resource.data.keys().hasAll(
+        ['registrantName', 'registrantEmail', 'companions', 'ticketId', 'createdAt']
+      );
+      allow update, delete: if false;
+    }
+
+    // Gallery - read and write rule
+    match /graduationPhotos/{docId} {
+      allow read: if true;
+      allow create, delete: if request.auth != null;
+    }
+
+    match /aspirations/{docId} {
+      allow read: if true;
+      allow create, update, delete: if request.auth != null;
+    }
+
+    // Afterparty waitlist — public create, auth required for read/delete
+    match /afterparty_waitlist/{docId} {
+      allow create: if request.resource.data.keys().hasAll(['email', 'createdAt'])
+                    && request.resource.data.email is string;
+      allow read, delete: if request.auth != null;
+      allow update: if false;
+    }
+
+    // =================================================================
+    //  SHARED TO-DO APP — collections: users, lists (+ tasks, comments), invites, mail
+    // =================================================================
+
+    // ---------- helpers ----------
+    function signedIn() { return request.auth != null; }
+    function myEmail()  { return request.auth.token.email.lower(); }
+    function hasEmail() { return signedIn() && request.auth.token.email is string; }
+
+    function listData(listId) {
+      return get(/databases/$(database)/documents/lists/$(listId)).data;
+    }
+
+    // 'owner' | 'read' | 'comment' | 'write' | 'readwrite' | null
+    function roleIn(list) {
+      return !signedIn() ? null
+        : list.ownerId == request.auth.uid ? 'owner'
+        : hasEmail() ? list.roles.get(myEmail(), null)
+        : null;
+    }
+    function canRead(role)    { return role != null; }
+    function canWrite(role)   { return role in ['owner', 'write', 'readwrite']; }
+    function canComment(role) { return role in ['owner', 'comment', 'readwrite']; }
+
+    function validRoles(d) {
+      return d.roles is map
+        && d.memberEmails is list
+        && d.memberEmails.size() <= 100
+        && d.memberEmails.toSet() == d.roles.keys().toSet()
+        && d.roles.values().toSet().difference(['read', 'comment', 'write', 'readwrite'].toSet()).size() == 0
+        && !(d.ownerEmail in d.memberEmails);
+    }
+    // People who left on their own. The owner sees them until sharing with them again.
+    function leftOf(d) { return d.get('leftEmails', []); }
+    function validLeft(d) {
+      return leftOf(d) is list
+        && leftOf(d).size() <= 100
+        && leftOf(d).toSet().intersection(d.memberEmails.toSet()).size() == 0;
+    }
+    function validList(d) {
+      return d.keys().hasOnly(['title', 'ownerId', 'ownerEmail', 'ownerName', 'roles', 'memberEmails', 'leftEmails', 'archived', 'createdAt', 'updatedAt'])
+        && d.title is string && d.title.size() >= 1 && d.title.size() <= 120
+        && d.get('archived', false) is bool
+        && validRoles(d)
+        && validLeft(d);
+    }
+
+    // ---------- users ----------
+    match /users/{uid} {
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create, update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'createdAt', 'updatedAt'])
+        && request.resource.data.get('favorites', []) is list
+        && request.resource.data.get('favorites', []).size() <= 500;
+    }
+
+    // ---------- lists ----------
+    match /lists/{listId} {
+      // owner, or anyone signed in with an email the list is shared to
+      allow read: if signedIn() && (
+        resource.data.ownerId == request.auth.uid
+        || (hasEmail() && myEmail() in resource.data.memberEmails)
+      );
+
+      // anyone signed in can create their own list (shared with nobody yet)
+      allow create: if hasEmail()
+        && request.resource.data.ownerId == request.auth.uid
+        && request.resource.data.ownerEmail == myEmail()
+        && request.resource.data.roles.size() == 0
+        && validList(request.resource.data);
+
+      allow update: if signedIn() && (
+        // owner: rename, archive, share, change or remove access
+        (resource.data.ownerId == request.auth.uid
+          && request.resource.data.ownerId == resource.data.ownerId
+          && request.resource.data.ownerEmail == resource.data.ownerEmail
+          && validList(request.resource.data))
+        // write roles: only bump "last changed" when they edit tasks
+        || (canWrite(roleIn(resource.data))
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']))
+        // any member: leave the list (remove only yourself, and record that you left)
+        || (hasEmail() && roleIn(resource.data) != null && roleIn(resource.data) != 'owner'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roles', 'memberEmails', 'leftEmails'])
+          && leftOf(request.resource.data).toSet() == leftOf(resource.data).toSet().union([myEmail()].toSet())
+          && validLeft(request.resource.data)
+          && resource.data.roles.diff(request.resource.data.roles).removedKeys() == [myEmail()].toSet()
+          && resource.data.roles.diff(request.resource.data.roles).addedKeys().size() == 0
+          && resource.data.roles.diff(request.resource.data.roles).changedKeys().size() == 0
+          && validRoles(request.resource.data))
+      );
+
+      allow delete: if signedIn() && resource.data.ownerId == request.auth.uid;
+
+      // ---------- tasks ----------
+      match /tasks/{taskId} {
+        function validTask(d) {
+          return d.keys().hasOnly(['text', 'done', 'archived', 'createdBy', 'createdByName', 'createdAt',
+                                   'updatedAt', 'updatedBy', 'updatedByName'])
+            && d.text is string && d.text.size() >= 1 && d.text.size() <= 500
+            && d.done is bool && d.archived is bool
+            && d.updatedBy == request.auth.uid;
+        }
+
+        allow read: if canRead(roleIn(listData(listId)));
+        allow create: if canWrite(roleIn(listData(listId)))
+          && validTask(request.resource.data)
+          && request.resource.data.createdBy == request.auth.uid;
+        allow update: if canWrite(roleIn(listData(listId)))
+          && validTask(request.resource.data)
+          && request.resource.data.createdBy == resource.data.createdBy
+          && request.resource.data.createdAt == resource.data.createdAt;
+        allow delete: if canWrite(roleIn(listData(listId)));
+      }
+
+      // ---------- comments ----------
+      match /comments/{commentId} {
+        allow read: if canComment(roleIn(listData(listId)));
+        allow create: if canComment(roleIn(listData(listId)))
+          && request.resource.data.keys().hasOnly(['text', 'userId', 'userName', 'userEmail', 'createdAt'])
+          && request.resource.data.userId == request.auth.uid
+          && request.resource.data.text is string
+          && request.resource.data.text.size() >= 1 && request.resource.data.text.size() <= 2000;
+        // delete your own comment; the owner can tidy any comment
+        allow delete: if signedIn() && (
+          resource.data.userId == request.auth.uid
+          || listData(listId).ownerId == request.auth.uid
+        );
+      }
+    }
+
+    // ---------- in-app notifications: "X shared a list with you" ----------
+    // Written by the owner in the same batch as the share, so getAfter() sees the new member.
+    match /invites/{inviteId} {
+      function ownsListAfter(d) {
+        return getAfter(/databases/$(database)/documents/lists/$(d.listId)).data.ownerId == request.auth.uid;
+      }
+      function validInvite(d) {
+        return d.keys().hasOnly(['to', 'listId', 'listTitle', 'fromName', 'fromEmail', 'permission', 'seen', 'createdAt'])
+          && d.to is string && d.listId is string && d.listTitle is string && d.listTitle.size() <= 120
+          && d.fromEmail == myEmail() && d.seen == false
+          && ownsListAfter(d)
+          && d.to in getAfter(/databases/$(database)/documents/lists/$(d.listId)).data.memberEmails;
+      }
+
+      allow read: if hasEmail() && resource.data.to == myEmail();
+      allow create: if hasEmail() && validInvite(request.resource.data);
+      allow update: if hasEmail() && (
+        // owner shares again
+        validInvite(request.resource.data)
+        // recipient marks it as seen
+        || (resource.data.to == myEmail()
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen'])
+          && request.resource.data.seen == true)
+      );
+      // recipient dismisses or leaves; owner removes access. Lists shared before
+      // notifications existed have no invite doc, so deleting nothing is allowed.
+      allow delete: if hasEmail() && (
+        resource == null
+        || resource.data.to == myEmail()
+        || listData(resource.data.listId).ownerId == request.auth.uid
+      );
+    }
+
+    // ---------- optional: invitation emails ----------
+    // Only the list owner can queue an email, and only to someone already on that list.
+    match /mail/{mailId} {
+      allow create: if signedIn()
+        && request.resource.data.keys().hasOnly(['to', 'message', 'listId', 'createdBy'])
+        && request.resource.data.createdBy == request.auth.uid
+        && request.resource.data.listId is string
+        && listData(request.resource.data.listId).ownerId == request.auth.uid
+        && request.resource.data.to in listData(request.resource.data.listId).memberEmails
+        && request.resource.data.message.keys().hasOnly(['subject', 'html', 'text'])
+        && request.resource.data.message.subject.size() <= 200
+        && request.resource.data.message.html.size() <= 5000;
+      allow read, update, delete: if false;
+    }
+  }
+}
