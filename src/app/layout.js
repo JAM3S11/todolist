@@ -5,7 +5,7 @@ export const metadata = {
   description: 'To-do lists you can share with read, comment and write access.',
 };
 
-export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover' };
+export const viewport = { width: 'device-width', initialScale: 1, viewportFit: 'cover', themeColor: '#0f1514', colorScheme: 'dark' };
 
 export default function RootLayout({ children }) {
   return (

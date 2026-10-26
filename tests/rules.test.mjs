@@ -189,6 +189,10 @@ describe('profiles and invitations', () => {
     assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { lastListId: LIST, updatedAt: serverTimestamp() }, { merge: true })));
   test('save your own favourites', () =>
     assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { favorites: arrayUnion(LIST), updatedAt: serverTimestamp() }, { merge: true })));
+  test('save your own list order', () =>
+    assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { listOrder: [LIST, 'other'], updatedAt: serverTimestamp() }, { merge: true })));
+  test('list order must be a list', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { listOrder: 'nope' }, { merge: true })));
   test("cannot change someone else's favourites", () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'owner'), { favorites: [LIST] }, { merge: true })));
   test('cannot read someone else\'s profile', () => assertFails(getDoc(doc(as('reader'), 'users', 'owner'))));

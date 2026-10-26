@@ -59,6 +59,14 @@ export const setFavorite = (uid, listId, on) =>
     { merge: true },
   );
 
+// The order I dragged my lists into on My List (also personal, so also on my profile)
+export function watchListOrder(uid, onData) {
+  return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().listOrder || [] : []), () => onData([]));
+}
+
+export const saveListOrder = (uid, ids) =>
+  setDoc(doc(db(), 'users', uid), { listOrder: ids.slice(0, 500), updatedAt: serverTimestamp() }, { merge: true });
+
 // ---------- lists ----------
 const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
 

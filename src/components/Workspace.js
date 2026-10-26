@@ -13,15 +13,17 @@ import {
   markInviteSeen,
   renameList,
   saveLastListId,
+  saveListOrder,
   saveProfile,
   setFavorite,
   watchFavorites,
   watchInvites,
+  watchListOrder,
   watchOwnedLists,
   watchSharedLists,
 } from '@/lib/data';
 import { roleLabel } from '@/lib/permissions';
-import { Avatar, displayName, toDate } from '@/lib/people';
+import { Avatar, colorFor, displayName, toDate } from '@/lib/people';
 import Board from './Board';
 import Emblem from './Emblem';
 import ListDialog from './ListDialogs';
@@ -59,6 +61,31 @@ function WorkspaceInner({ user }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const restored = useRef(false);
   const goingAway = useRef(null); // list I'm deleting or leaving on purpose, so it doesn't count as "access removed"
+  const menuBtn = useRef(null);
+  const closeBtn = useRef(null);
+  // Desktop sidebar collapsed to icons, remembered on this device (Workspace only renders in the browser, after sign-in)
+  const [rail, setRail] = useState(() => {
+    try { return localStorage.getItem('sidebar') === 'rail'; } catch { return false; }
+  });
+  function toggleRail() {
+    setRail((r) => {
+      try { localStorage.setItem('sidebar', r ? 'full' : 'rail'); } catch {}
+      return !r;
+    });
+  }
+
+  // ---- phone drawer: focus starts on its ✕; Escape closes it and hands focus back to the ☰ button
+  useEffect(() => {
+    if (!menuOpen) return;
+    closeBtn.current?.focus();
+    const onKey = (e) => {
+      if (e.key !== 'Escape') return;
+      setMenuOpen(false);
+      menuBtn.current?.focus();
+    };
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [menuOpen]);
 
   // ---- save my profile once per sign-in
   useEffect(() => {
@@ -83,6 +110,11 @@ function WorkspaceInner({ user }) {
   // ---- my favourite lists (stored on my profile, so they follow me to any device)
   useEffect(() => watchFavorites(user.uid, setFavList), [user.uid]);
   const favorites = useMemo(() => new Set(favList), [favList]);
+
+  // ---- the order I dragged my lists into (also on my profile)
+  const [order, setOrder] = useState([]);
+  useEffect(() => watchListOrder(user.uid, setOrder), [user.uid]);
+  const rank = useMemo(() => new Map(order.map((id, i) => [id, i])), [order]);
 
   const lists = useMemo(() => {
     // wait for both, so "where I left off" can be a list someone shared with me
@@ -202,10 +234,19 @@ function WorkspaceInner({ user }) {
 
   const active = lists?.find((l) => l.id === activeId) || null;
   const dialogList = dialog && lists?.find((l) => l.id === dialog.id);
-  // favourites first, then most recently changed
-  const byFav = (arr) => [...arr].sort((a, b) => favorites.has(b.id) - favorites.has(a.id));
-  const mine = byFav((lists || []).filter((l) => l.role === 'owner' && !l.archived));
-  const others = byFav((lists || []).filter((l) => l.role !== 'owner' && !l.archived));
+  // My own drag order once I've set one (new lists go after it), else favourites first; most recently changed breaks ties
+  const arrange = (arr) =>
+    order.length
+      ? [...arr].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || 0)
+      : [...arr].sort((a, b) => favorites.has(b.id) - favorites.has(a.id));
+  const arranged = arrange(lists || []);
+  const mine = arranged.filter((l) => l.role === 'owner' && !l.archived);
+  const others = arranged.filter((l) => l.role !== 'owner' && !l.archived);
+  // From dragging on My List: the cards I moved, then everything else in its current place
+  const onReorder = (ids) => {
+    const moved = new Set(ids);
+    report(saveListOrder(user.uid, [...ids, ...arranged.map((l) => l.id).filter((id) => !moved.has(id))]));
+  };
   const archived = (lists || []).filter((l) => l.archived);
   const pick = (id) => { setActiveId(id); setView('list'); setMenuOpen(false); };
   const group = { activeId: view === 'list' ? activeId : null, onPick: pick, favorites, actions };
@@ -221,44 +262,73 @@ function WorkspaceInner({ user }) {
   }, [lists, email]);
 
   return (
-    <div className="shell">
+    <div className={rail ? 'shell rail' : 'shell'}>
       <aside className={menuOpen ? 'side open' : 'side'}>
         <div className="side-top">
-          <div className="brand"><Emblem size={28} />Shared To-Do</div>
+          <button ref={menuBtn} className="burger only-mobile" type="button" onClick={() => setMenuOpen(true)}
+            aria-expanded={menuOpen} aria-controls="side-body" aria-label="Open menu">
+            <span aria-hidden="true" />
+          </button>
+          <div className="brand"><Emblem size={28} /><span className="brand-name">Shared To-Do</span></div>
           <Notifications notes={notes} onOpen={pick} onDismiss={(id) => dismissInvite(id).catch(() => {})} />
-          <button className="ic only-mobile" type="button" onClick={() => setMenuOpen((o) => !o)} aria-expanded={menuOpen}>
-            {menuOpen ? 'Close' : 'Lists'}
+          <button className="side-btn collapse only-desktop" type="button" onClick={toggleRail}
+            aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} title={rail ? 'Expand sidebar' : 'Collapse sidebar'}>
+            <Icon name="sidebar" />
           </button>
         </div>
 
-        <div className="side-body">
-          <button type="button" className={view === 'board' ? 'list-link board-link on' : 'list-link board-link'}
-            onClick={() => { setView('board'); setMenuOpen(false); }}>
-            <span className="ll-title">▦ My List</span>
-            <span className="count">{(lists || []).filter((l) => !l.archived).length}</span>
-          </button>
+        <div className="side-scrim" onClick={() => setMenuOpen(false)} aria-hidden="true" />
 
-          <ListGroup title="Owned by me" lists={mine} {...group}
-            empty={lists === null ? 'Loading…' : 'Open My List and press + to create a list.'} />
-          <ListGroup title="Shared with me" lists={others} {...group}
-            empty={lists === null ? '' : 'Lists people share with you appear here.'} />
+        <div className="side-body" id="side-body">
+          <div className="drawer-head">
+            <div className="brand"><Emblem size={26} /><span className="brand-name">Shared To-Do</span></div>
+            <button ref={closeBtn} className="side-btn" type="button" onClick={() => { setMenuOpen(false); menuBtn.current?.focus(); }}
+              aria-label="Close menu">
+              <Icon name="close" />
+            </button>
+          </div>
 
-          {archived.length > 0 && (
-            <div>
-              <button className="arch-toggle" type="button" onClick={() => setShowArchived((s) => !s)} aria-expanded={showArchived}>
-                {showArchived ? '▾' : '▸'} Archived ({archived.length})
+          {/* only this middle part scrolls, so the header and my account card always stay on screen */}
+          <div className="side-scroll">
+            <button type="button" className="new-list" title="New list"
+              onClick={() => { setView('board'); setCreating(true); setMenuOpen(false); }}>
+              <Icon name="plus" /><span className="lbl">New list</span>
+            </button>
+
+            <nav className="group" aria-label="Main">
+              <button type="button" className={view === 'board' ? 'nav-i on' : 'nav-i'} title="My List"
+                aria-current={view === 'board' ? 'page' : undefined}
+                onClick={() => { setView('board'); setMenuOpen(false); }}>
+                <Icon name="grid" /><span className="lbl">My List</span>
+                <span className="count">{(lists || []).filter((l) => !l.archived).length}</span>
               </button>
-              {showArchived && <ListGroup lists={archived} {...group} />}
-            </div>
-          )}
+            </nav>
+
+            <ListGroup title="Owned by me" lists={mine} {...group}
+              empty={lists === null ? 'Loading…' : 'Press “New list” to create your first one.'} />
+            <ListGroup title="Shared with me" lists={others} {...group}
+              empty={lists === null ? '' : 'Lists people share with you appear here.'} />
+
+            {archived.length > 0 && (
+              <div className="group">
+                <button className="nav-i" type="button" title="Archived" onClick={() => setShowArchived((s) => !s)} aria-expanded={showArchived}>
+                  <Icon name="archive" /><span className="lbl">Archived</span>
+                  <span className="count">{archived.length}</span>
+                </button>
+                {showArchived && <ListGroup lists={archived} {...group} />}
+              </div>
+            )}
+          </div>
 
           <div className="me">
-            <Avatar person={{ email, displayName: user.displayName }} size={30} />
+            <Avatar person={{ email, displayName: user.displayName }} size={32} />
             <div className="me-txt">
               <div className="me-name">{user.displayName || email.split('@')[0]}</div>
               <div className="me-email">{user.email}</div>
             </div>
-            <button className="ic" type="button" onClick={onSignOut}>Sign out</button>
+            <button className="side-btn signout" type="button" onClick={onSignOut} aria-label="Sign out" title="Sign out">
+              <Icon name="logout" /><span className="signout-lbl">Sign out</span>
+            </button>
           </div>
         </div>
       </aside>
@@ -267,7 +337,8 @@ function WorkspaceInner({ user }) {
         {lists === null ? (
           <div className="center muted">Loading your lists…</div>
         ) : view === 'board' ? (
-          <Board lists={lists} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)} />
+          <Board lists={arranged} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)}
+            onReorder={onReorder} />
         ) : active ? (
           <ListView key={active.id} list={active} role={active.role} user={user} contacts={contacts}
             onLeave={actions.leave} onDelete={actions.remove} onArchive={actions.archive}
@@ -302,22 +373,50 @@ function WorkspaceInner({ user }) {
 }
 
 function ListGroup({ title, lists, activeId, onPick, favorites, actions, empty }) {
+  const [open, setOpen] = useState(true);
   return (
-    <nav className="group">
-      {title && <div className="sec-l">{title}</div>}
-      {lists.length === 0 && empty && <div className="muted small pad">{empty}</div>}
-      {lists.map((l) => (
+    <nav className="group" aria-label={title}>
+      {title && (
+        <button type="button" className="sec-h" onClick={() => setOpen((o) => !o)} aria-expanded={open}>
+          <Icon name="chevron" /><span>{title}</span>
+          {lists.length > 0 && <span className="count">{lists.length}</span>}
+        </button>
+      )}
+      {open && lists.length === 0 && empty && <div className="side-empty">{empty}</div>}
+      {open && lists.map((l) => (
         <div key={l.id} className={l.id === activeId ? 'list-item on' : 'list-item'}>
-          <button type="button" className={l.id === activeId ? 'list-link on' : 'list-link'} onClick={() => onPick(l.id)}>
-            <span className="ll-title">
-              {favorites.has(l.id) && <span className="star" aria-label="Favourite">★ </span>}
-              {l.title}
+          <button type="button" className="list-link" title={l.title} onClick={() => onPick(l.id)}
+            aria-current={l.id === activeId ? 'page' : undefined}>
+            <span className="li-mark" style={{ background: colorFor(l.id) }} aria-hidden="true">
+              {(l.title || '?').trim()[0]?.toUpperCase()}
             </span>
+            <span className="ll-title">{l.title}</span>
+            {favorites.has(l.id) && <span className="star" aria-label="Favourite">★</span>}
             {l.role !== 'owner' && <span className={`pill ${l.role}`}>{roleLabel(l.role)}</span>}
           </button>
           <ListMenu list={l} favorite={favorites.has(l.id)} actions={actions} />
         </div>
       ))}
     </nav>
+  );
+}
+
+// Small line icons for the sidebar
+const ICONS = {
+  plus: <path d="M12 5v14M5 12h14" />,
+  grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
+  archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" /></>,
+  chevron: <path d="m9 6 6 6-6 6" />,
+  sidebar: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 10l-2 2 2 2" /></>,
+  logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
+  close: <path d="M18 6 6 18M6 6l12 12" />,
+};
+
+function Icon({ name }) {
+  return (
+    <svg className={`icon i-${name}`} width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      {ICONS[name]}
+    </svg>
   );
 }
