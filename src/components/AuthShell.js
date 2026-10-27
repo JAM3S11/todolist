@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { LoaderIcon } from 'lucide-react';
 import Emblem from './Emblem';
 
 // Every auth screen (sign in, sign up, forgot password, the emailed reset link): brand panel on the
@@ -126,6 +127,7 @@ export function Strength({ password }) {
   );
 }
 
+// In buttons the text beside it says what's happening, so the icon itself is hidden from screen readers
 export function Spinner() {
-  return <span className="spin" aria-hidden="true" />;
+  return <LoaderIcon width={16} height={16} className="spinner" aria-hidden="true" />;
 }

@@ -1,27 +1,205 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { dismissInvite, markInviteSeen } from '@/lib/data';
+import { addDays, dueLabel, fromKey, timeRange, todayKey } from '@/lib/dates';
+import { friendlyError } from '@/lib/firebase';
 import { roleLabel } from '@/lib/permissions';
-import { timeAgo } from '@/lib/people';
+import { Avatar, colorFor, toDate } from '@/lib/people';
 import { useToast } from './Toast';
 
-// The bell in the sidebar: lists people have shared with me, newest first
-export default function Notifications({ notes, onOpen, onDismiss }) {
-  const toast = useToast();
-  const [open, setOpen] = useState(false);
-  const box = useRef(null);
-  const known = useRef(null); // ids already on screen, so only new shares pop a toast
-  const unread = notes.filter((n) => !n.seen).length;
+const OVERDUE_DAYS = 30; // older overdue tasks stop showing up as reminders
+const PANEL_MAX = 8;
 
-  // A share that arrives while the app is open shows up as a toast too
+// ---------------------------------------------------------------------------
+// Everything that's a notification, newest first:
+//  • share    — someone shared a list with me (stored in Firestore, read state syncs across devices)
+//  • due      — one of my open tasks is due today
+//  • overdue  — an open task is past its date (last 30 days)
+// Reminders are worked out from the tasks; their read / cleared state is kept in this browser.
+// ---------------------------------------------------------------------------
+export function useNotifications({ invites, lists, tasksByList, uid }) {
+  const toast = useToast();
+  const storeKey = `notifications:${uid}`;
+  const [local, setLocal] = useState({ read: [], gone: [] });
   useEffect(() => {
-    const ids = new Set(notes.map((n) => n.id));
+    try { setLocal(JSON.parse(localStorage.getItem(storeKey)) || { read: [], gone: [] }); } catch {}
+  }, [storeKey]);
+  const saveLocal = (fn) => setLocal((prev) => {
+    const next = fn(prev);
+    try { localStorage.setItem(storeKey, JSON.stringify(next)); } catch {}
+    return next;
+  });
+
+  const today = todayKey();
+  const items = useMemo(() => {
+    const read = new Set(local.read);
+    const gone = new Set(local.gone);
+    const byId = new Map((lists || []).map((l) => [l.id, l]));
+    const out = [];
+
+    for (const inv of invites) {
+      const list = byId.get(inv.listId);
+      if (!list) continue; // deleted, or my access was removed
+      out.push({
+        id: `share:${inv.id}`, kind: 'share', inviteId: inv.id, read: !!inv.seen, at: toDate(inv.createdAt),
+        listId: list.id, listTitle: list.title, role: list.role,
+        from: { email: inv.fromEmail, displayName: inv.fromName },
+      });
+    }
+
+    const oldest = addDays(today, -OVERDUE_DAYS);
+    for (const list of lists || []) {
+      if (list.archived) continue;
+      for (const t of tasksByList[list.id] || []) {
+        if (t.done || t.archived || !t.due || t.due > today || t.due < oldest) continue;
+        const id = `${t.due === today ? 'due' : 'overdue'}:${list.id}/${t.id}:${t.due}`;
+        if (gone.has(id)) continue;
+        // a reminder "arrives" at the start of its day (or at its start time today)
+        const at = fromKey(t.due);
+        if (t.start && t.due === today) at.setHours(...t.start.split(':').map(Number));
+        out.push({
+          id, kind: t.due === today ? 'due' : 'overdue', read: read.has(id), at,
+          listId: list.id, listTitle: list.title, role: list.role, task: t,
+        });
+      }
+    }
+    return out.sort((a, b) => b.at - a.at);
+  }, [invites, lists, tasksByList, local, today]);
+
+  // A share that arrives while the app is open also pops a toast
+  const known = useRef(null);
+  useEffect(() => {
+    if (!lists) return; // wait for the lists, or every share would look new on load
+    const shares = items.filter((n) => n.kind === 'share');
     if (known.current) {
-      const fresh = notes.filter((n) => !n.seen && !known.current.has(n.id));
-      if (fresh.length === 1) toast(`${fresh[0].fromName || fresh[0].fromEmail} shared “${fresh[0].listTitle}” with you`);
+      const fresh = shares.filter((n) => !n.read && !known.current.has(n.id));
+      if (fresh.length === 1) toast(`${fresh[0].from.displayName || fresh[0].from.email} shared “${fresh[0].listTitle}” with you`);
       else if (fresh.length > 1) toast(`${fresh.length} lists were shared with you`);
     }
-    known.current = ids;
-  }, [notes, toast]);
+    known.current = new Set(shares.map((n) => n.id));
+  }, [items, lists, toast]);
+
+  const fail = (err) => toast(`Couldn't update the notification: ${friendlyError(err)}`, 'err');
+  const setRead = (n, on) => {
+    if (n.read === on) return;
+    if (n.kind === 'share') markInviteSeen(n.inviteId, on).catch(fail);
+    else saveLocal((p) => ({ ...p, read: on ? [...new Set([...p.read, n.id])].slice(-500) : p.read.filter((x) => x !== n.id) }));
+  };
+  const dismiss = (n) => {
+    if (n.kind === 'share') dismissInvite(n.inviteId).catch(fail);
+    else saveLocal((p) => ({ read: p.read.filter((x) => x !== n.id), gone: [...new Set([...p.gone, n.id])].slice(-500) }));
+  };
+  const markAllRead = () => {
+    const unread = items.filter((n) => !n.read);
+    unread.filter((n) => n.kind === 'share').forEach((n) => markInviteSeen(n.inviteId, true).catch(fail));
+    const ids = unread.filter((n) => n.kind !== 'share').map((n) => n.id);
+    if (ids.length) saveLocal((p) => ({ ...p, read: [...new Set([...p.read, ...ids])].slice(-500) }));
+  };
+
+  return { items, unread: items.filter((n) => !n.read).length, setRead, dismiss, markAllRead };
+}
+
+// ---------------------------------------------------------------------------
+// How one notification reads
+// ---------------------------------------------------------------------------
+const KIND = {
+  share: { label: 'Shared with you', cta: 'Open list' },
+  due: { label: 'Due today', cta: 'Open task' },
+  overdue: { label: 'Overdue', cta: 'Open task' },
+};
+
+function Headline({ n }) {
+  if (n.kind === 'share') {
+    return <><b>{n.from.displayName || n.from.email}</b> shared <b>“{n.listTitle}”</b> with you</>;
+  }
+  if (n.kind === 'due') {
+    return <><b>“{n.task.text}”</b> is due today{n.task.start ? ` at ${n.task.start}` : ''}</>;
+  }
+  const days = Math.round((fromKey(todayKey()) - fromKey(n.task.due)) / 86_400_000);
+  return <><b>“{n.task.text}”</b> is overdue by {days} day{days > 1 ? 's' : ''}</>;
+}
+
+function KindIcon({ n, size = 36 }) {
+  if (n.kind === 'share') {
+    return (
+      <span className="nt-ic k-share" style={{ width: size, height: size }}>
+        <Avatar person={n.from} size={size} />
+        <span className="nt-ic-mini" aria-hidden="true">
+          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" /></svg>
+        </span>
+      </span>
+    );
+  }
+  return (
+    <span className={`nt-ic k-${n.kind}`} style={{ width: size, height: size }} aria-hidden="true">
+      {n.kind === 'due' ? (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M5 3 2 6M22 6l-3-3" /></svg>
+      ) : (
+        <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0zM12 9v4M12 17h.01" /></svg>
+      )}
+    </span>
+  );
+}
+
+const ago = (d) => {
+  const s = (Date.now() - d.getTime()) / 1000;
+  if (s < 0) return 'later today';
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)}m ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)}h ago`;
+  if (s < 7 * 86400) return `${Math.floor(s / 86400)}d ago`;
+  return d.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' });
+};
+const fullTime = (d) => d.toLocaleString('en-GB', { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+// Today / Yesterday / This week / Earlier
+function groupByDay(items) {
+  const t = todayKey();
+  const label = (d) => {
+    const k = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    if (k >= t) return 'Today';
+    if (k === addDays(t, -1)) return 'Yesterday';
+    if (k > addDays(t, -7)) return 'This week';
+    return 'Earlier';
+  };
+  const groups = [];
+  for (const n of items) {
+    const g = label(n.at);
+    if (groups.at(-1)?.label !== g) groups.push({ label: g, items: [] });
+    groups.at(-1).items.push(n);
+  }
+  return groups;
+}
+
+// small icon buttons that appear on a row
+function RowActions({ n, api }) {
+  return (
+    <div className="nt-acts">
+      <button type="button" className="nt-act" onClick={(e) => { e.stopPropagation(); api.setRead(n, !n.read); }}
+        title={n.read ? 'Mark as unread' : 'Mark as read'} aria-label={n.read ? 'Mark as unread' : 'Mark as read'}>
+        {n.read ? (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /></svg>
+        ) : (
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5" /></svg>
+        )}
+      </button>
+      <button type="button" className="nt-act" onClick={(e) => { e.stopPropagation(); api.dismiss(n); }}
+        title="Remove" aria-label="Remove notification">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" aria-hidden="true"><path d="M18 6 6 18M6 6l12 12" /></svg>
+      </button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The bell and its drop-down panel
+// ---------------------------------------------------------------------------
+export default function Notifications({ api, onOpen, onViewAll }) {
+  const [open, setOpen] = useState(false);
+  const [tab, setTab] = useState('all');
+  const box = useRef(null);
+  const { items, unread } = api;
+  const shown = (tab === 'unread' ? items.filter((n) => !n.read) : items).slice(0, PANEL_MAX);
 
   useEffect(() => {
     if (!open) return;
@@ -35,10 +213,12 @@ export default function Notifications({ notes, onOpen, onDismiss }) {
     };
   }, [open]);
 
+  const go = (n) => { api.setRead(n, true); onOpen(n.listId); setOpen(false); };
+
   return (
     <div className="notif" ref={box}>
-      <button className="bell" type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open}
-        aria-label={unread ? `Notifications, ${unread} new` : 'Notifications'}>
+      <button className={open ? 'bell on' : 'bell'} type="button" onClick={() => setOpen((o) => !o)} aria-expanded={open} aria-haspopup="dialog"
+        aria-label={unread ? `Notifications, ${unread} unread` : 'Notifications'} title="Notifications">
         <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
           <path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" />
           <path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" />
@@ -47,23 +227,200 @@ export default function Notifications({ notes, onOpen, onDismiss }) {
       </button>
 
       {open && (
-        <div className="notif-panel" role="dialog" aria-label="Notifications">
-          <div className="sec-l">Notifications</div>
-          {notes.length === 0 && <div className="muted small pad">When someone shares a list with you, it shows up here.</div>}
-          {notes.map((n) => (
-            <div key={n.id} className={n.seen ? 'notif-item' : 'notif-item new'}>
-              <button className="note-open" type="button" onClick={() => { onOpen(n.listId); setOpen(false); }}>
-                <span><b>{n.fromName || n.fromEmail}</b> shared <b>“{n.listTitle}”</b> with you</span>
-                <span className="note-meta">
-                  {n.role && <span className={`pill ${n.role}`}>{roleLabel(n.role)}</span>}
-                  <span>{timeAgo(n.createdAt)}</span>
-                </span>
-              </button>
-              <button className="ic" type="button" onClick={() => onDismiss(n.id)} aria-label="Dismiss notification">✕</button>
+        <div className="np" role="dialog" aria-label="Notifications">
+          <div className="np-h">
+            <div className="np-title">
+              <h2>Notifications</h2>
+              {unread > 0 && <span className="np-count">{unread} new</span>}
             </div>
-          ))}
+            <button type="button" className="link small" onClick={api.markAllRead} disabled={!unread}>Mark all as read</button>
+          </div>
+          <div className="np-tabs" role="tablist">
+            {[['all', 'All', items.length], ['unread', 'Unread', unread]].map(([k, label, n]) => (
+              <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
+                {label}<span>{n}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="np-body">
+            {shown.length === 0 ? (
+              <Empty unreadOnly={tab === 'unread'} compact />
+            ) : (
+              groupByDay(shown).map((g) => (
+                <section key={g.label}>
+                  <h3 className="np-g">{g.label}</h3>
+                  {g.items.map((n) => (
+                    <div key={n.id} className={n.read ? 'np-row' : 'np-row unread'} role="button" tabIndex={0}
+                      onClick={() => go(n)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go(n))}>
+                      <KindIcon n={n} />
+                      <div className="np-row-b">
+                        <p className="np-row-t"><Headline n={n} /></p>
+                        <p className="np-row-m">
+                          <span className={`nt-kind k-${n.kind}`}>{KIND[n.kind].label}</span>
+                          <span className="nt-dot" aria-hidden="true">·</span>
+                          <time dateTime={n.at.toISOString()} title={fullTime(n.at)}>{ago(n.at)}</time>
+                        </p>
+                      </div>
+                      {!n.read && <span className="np-unread" aria-label="Unread" />}
+                      <RowActions n={n} api={api} />
+                    </div>
+                  ))}
+                </section>
+              ))
+            )}
+          </div>
+
+          <button type="button" className="np-f" onClick={() => { setOpen(false); onViewAll(); }}>
+            View all notifications
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
+          </button>
         </div>
       )}
+    </div>
+  );
+}
+
+function Empty({ unreadOnly, filtered, compact }) {
+  return (
+    <div className={compact ? 'nt-empty compact' : 'nt-empty'}>
+      <span className="nt-empty-ic" aria-hidden="true">
+        <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></svg>
+      </span>
+      <b>{unreadOnly ? "You're all caught up" : filtered ? 'Nothing here' : 'No notifications yet'}</b>
+      <span>
+        {unreadOnly
+          ? 'There are no unread notifications.'
+          : filtered
+            ? 'Nothing matches this filter.'
+            : 'When someone shares a list with you, or a task is due, it shows up here.'}
+      </span>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The full Notifications page
+// ---------------------------------------------------------------------------
+const FILTERS = {
+  all: { label: 'All', test: () => true },
+  unread: { label: 'Unread', test: (n) => !n.read },
+  share: { label: 'Shared with you', test: (n) => n.kind === 'share' },
+  reminders: { label: 'Reminders', test: (n) => n.kind !== 'share' },
+};
+
+export function NotificationsPage({ api, onOpen }) {
+  const [filter, setFilter] = useState('all');
+  const [query, setQuery] = useState('');
+  const { items, unread } = api;
+  const q = query.trim().toLowerCase();
+  const text = (n) => `${n.listTitle} ${n.task?.text || ''} ${n.from?.displayName || ''} ${n.from?.email || ''}`.toLowerCase();
+  const shown = items.filter((n) => FILTERS[filter].test(n) && (!q || text(n).includes(q)));
+  const count = (k) => items.filter(FILTERS[k].test).length;
+  const stats = [
+    { label: 'Unread', value: unread, tone: 'accent' },
+    { label: 'Shared with you', value: count('share'), tone: '' },
+    { label: 'Due today', value: items.filter((n) => n.kind === 'due').length, tone: 'warn' },
+    { label: 'Overdue', value: items.filter((n) => n.kind === 'overdue').length, tone: 'danger' },
+  ];
+  const go = (n) => { api.setRead(n, true); onOpen(n.listId); };
+
+  return (
+    <div className="ntp">
+      <header className="bar">
+        <div className="bar-left">
+          <h1>Notifications</h1>
+          <div className="meta">{unread ? `${unread} unread` : 'All caught up'} · lists shared with you and task reminders</div>
+        </div>
+        <div className="bar-right">
+          <button className="btn" type="button" onClick={api.markAllRead} disabled={!unread}>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 7 17l-5-5M22 10l-7.5 7.5L13 16" /></svg>
+            <span className="ntp-mark-l">Mark all as read</span><span className="ntp-mark-s">Read all</span>
+          </button>
+        </div>
+      </header>
+
+      <div className="ntp-stats">
+        {stats.map((s) => (
+          <div key={s.label} className={`ntp-stat ${s.tone}`}>
+            <span>{s.label}</span>
+            <b>{s.value}</b>
+          </div>
+        ))}
+      </div>
+
+      <div className="ntp-tools">
+        <div className="ntp-filters" role="tablist" aria-label="Filter notifications">
+          {Object.entries(FILTERS).map(([k, f]) => (
+            <button key={k} type="button" role="tab" aria-selected={filter === k} className={filter === k ? 'on' : ''} onClick={() => setFilter(k)}>
+              {f.label}<span>{count(k)}</span>
+            </button>
+          ))}
+        </div>
+        <div className="cal-search ntp-search" role="search">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search notifications" aria-label="Search notifications" />
+        </div>
+      </div>
+
+      <div className="ntp-list">
+        {shown.length === 0 ? (
+          <Empty unreadOnly={filter === 'unread' && !q} filtered={filter !== 'all' || !!q} />
+        ) : (
+          groupByDay(shown).map((g) => (
+            <section key={g.label} className="ntp-group" aria-label={g.label}>
+              <h2 className="ntp-g">{g.label}<span>{g.items.length}</span></h2>
+              <ul>
+                {g.items.map((n) => (
+                  <li key={n.id} className={n.read ? 'ntp-row' : 'ntp-row unread'}>
+                    {!n.read && <span className="ntp-bar" aria-hidden="true" />}
+                    <KindIcon n={n} size={42} />
+                    <div className="ntp-row-b">
+                      <div className="ntp-row-top">
+                        <span className={`nt-kind k-${n.kind}`}>{KIND[n.kind].label}</span>
+                        <time dateTime={n.at.toISOString()} title={fullTime(n.at)}>{ago(n.at)}</time>
+                        {!n.read && <span className="ntp-new">New</span>}
+                      </div>
+                      <p className="ntp-row-t"><Headline n={n} /></p>
+                      <Details n={n} />
+                    </div>
+                    <div className="ntp-row-side">
+                      <button type="button" className="btn small-btn" onClick={() => go(n)}>{KIND[n.kind].cta}</button>
+                      <RowActions n={n} api={api} />
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+// The detail line under a notification on the page
+function Details({ n }) {
+  const list = (
+    <span className="ntp-list-chip"><i style={{ background: colorFor(n.listId) }} />{n.listTitle}</span>
+  );
+  if (n.kind === 'share') {
+    return (
+      <div className="ntp-d">
+        {list}
+        {n.role && <span className={`pill ${n.role}`}>{roleLabel(n.role)}</span>}
+        <span className="ntp-d-extra">from {n.from.email}</span>
+        <span className="ntp-d-extra">{fullTime(n.at)}</span>
+      </div>
+    );
+  }
+  const t = n.task;
+  return (
+    <div className="ntp-d">
+      {list}
+      <span className={n.kind === 'overdue' ? 'late-txt' : ''}>Due {dueLabel(t.due).toLowerCase()}{t.start ? `, ${timeRange(t.start, t.mins)}` : ''}</span>
+      {t.createdByName && <span className="ntp-d-extra">added by {t.createdByName}</span>}
+      {t.notes && <span className="ntp-notes" title={t.notes}>{t.notes}</span>}
     </div>
   );
 }

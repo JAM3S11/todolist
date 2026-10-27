@@ -169,7 +169,7 @@ export function watchInvites(email, onData, onError) {
   return onSnapshot(query(collection(db(), 'invites'), where('to', '==', email)), (s) => onData(withId(s)), onError);
 }
 
-export const markInviteSeen = (id) => updateDoc(doc(db(), 'invites', id), { seen: true });
+export const markInviteSeen = (id, seen = true) => updateDoc(doc(db(), 'invites', id), { seen });
 
 export const dismissInvite = (id) => writeBatch(db()).delete(doc(db(), 'invites', id)).commit();
 

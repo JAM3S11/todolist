@@ -244,10 +244,10 @@ service cloud.firestore {
       allow update: if hasEmail() && (
         // owner shares again
         validInvite(request.resource.data)
-        // recipient marks it as seen
+        // recipient marks it as read (or unread again)
         || (resource.data.to == myEmail()
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen'])
-          && request.resource.data.seen == true)
+          && request.resource.data.seen is bool)
       );
       // recipient dismisses or leaves; owner removes access. Lists shared before
       // notifications existed have no invite doc, so deleting nothing is allowed.
