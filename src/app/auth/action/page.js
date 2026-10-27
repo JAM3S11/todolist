@@ -10,7 +10,7 @@ import {
   signInWithEmailAndPassword,
   verifyPasswordResetCode,
 } from 'firebase/auth';
-import Emblem from '@/components/Emblem';
+import { Alert, AuthBadge, AuthShell, PasswordInput, Spinner, Strength, passwordScore } from '@/components/AuthShell';
 import { appUrl, isLocalHost, isOurUrl } from '@/lib/appUrl';
 import { fb, firebaseConfigured, friendlyError } from '@/lib/firebase';
 
@@ -60,29 +60,47 @@ export default function AuthAction() {
   const nextUrl = params?.next && isOurUrl(params.next) ? params.next : appUrl('/');
 
   return (
-    <div className="center auth">
-      <div className="card narrow login">
-        <div className="login-head">
-          <span className="emblem-tile"><Emblem size={46} /></span>
-          <h1>{stage === 'reset' ? 'Choose a new password' : 'Shared To-Do'}</h1>
-          {stage === 'reset' && <p className="muted">For <b>{email}</b></p>}
-        </div>
-
-        {stage === 'checking' && <p className="muted" style={{ textAlign: 'center' }}>Checking your link…</p>}
-        {stage === 'reset' && (
-          <ResetForm email={email} code={params.code}
-            onDone={() => window.location.assign(nextUrl)} />
+    <AuthShell>
+      <div className="auth-view" key={stage}>
+        {stage === 'checking' && (
+          <div className="auth-checking"><Spinner />Checking your link…</div>
         )}
-        {(stage === 'done' || stage === 'error') && (
+
+        {stage === 'reset' && (
           <>
-            <p className={stage === 'done' ? 'note ok' : 'note err'}>{message}</p>
-            <a className="btn primary block" href={stage === 'done' ? nextUrl : appUrl('/')}>
-              {stage === 'done' ? 'Continue to Shared To-Do' : 'Back to sign in'}
-            </a>
+            <AuthBadge icon="lock" />
+            <div className="auth-title">
+              <h1>Set a new password</h1>
+              <p>For <b className="auth-email">{email}</b>. You&apos;ll be signed in straight after.</p>
+            </div>
+            <ResetForm email={email} code={params.code} onDone={() => window.location.assign(nextUrl)} />
+          </>
+        )}
+
+        {stage === 'done' && (
+          <>
+            <AuthBadge icon="check" tone="ok" />
+            <div className="auth-title">
+              <h1>All set</h1>
+              <p>{message}</p>
+            </div>
+            <a className="btn primary block" href={nextUrl}>Continue to Shared To-Do</a>
+          </>
+        )}
+
+        {stage === 'error' && (
+          <>
+            <AuthBadge icon="alert" tone="err" />
+            <div className="auth-title">
+              <h1>This link doesn&apos;t work</h1>
+              <p>{message}</p>
+            </div>
+            <a className="btn primary block" href={appUrl('/?auth=forgot')}>Get a new reset link</a>
+            <p className="auth-alt"><a className="link" href={appUrl('/')}>Back to sign in</a></p>
           </>
         )}
       </div>
-    </div>
+    </AuthShell>
   );
 }
 
@@ -94,7 +112,7 @@ function ResetForm({ email, code, onDone }) {
 
   async function submit(e) {
     e.preventDefault();
-    if (password.length < 6) return setErr('Use a password with at least 6 characters.');
+    if (!passwordScore(password)) return setErr('Use a password with at least 6 characters.');
     if (password !== again) return setErr("The two passwords don't match.");
     setBusy(true);
     setErr('');
@@ -111,20 +129,27 @@ function ResetForm({ email, code, onDone }) {
   }
 
   return (
-    <form className="login-form" onSubmit={submit}>
-      <label className="field">
-        <span>New password</span>
-        <input id="new-password" type="password" autoFocus required minLength={6} autoComplete="new-password"
-          value={password} onChange={(e) => setPassword(e.target.value)} />
-      </label>
-      <label className="field">
-        <span>Type it again</span>
-        <input id="new-password-again" type="password" required minLength={6} autoComplete="new-password"
-          value={again} onChange={(e) => setAgain(e.target.value)} />
-      </label>
-      {err && <p className="note err">{err}</p>}
+    <form className="auth-form" onSubmit={submit}>
+      {/* lets password managers save the new password against the right account */}
+      <input type="email" value={email} autoComplete="username" readOnly hidden />
+      <div className="field">
+        <label htmlFor="new-password">New password</label>
+        <PasswordInput id="new-password" value={password} onChange={setPassword} autoComplete="new-password" autoFocus />
+        <Strength password={password} />
+      </div>
+      <div className="field">
+        <label htmlFor="new-password-again">Confirm new password</label>
+        <PasswordInput id="new-password-again" value={again} onChange={setAgain} autoComplete="new-password"
+          invalid={again.length > 0 && again !== password} />
+        {again && (
+          <span className={again === password ? 'match ok' : 'match'}>
+            {again === password ? '✓ Passwords match' : "Passwords don't match yet"}
+          </span>
+        )}
+      </div>
+      {err && <Alert>{err}</Alert>}
       <button className="btn primary block" type="submit" disabled={busy}>
-        {busy ? 'Saving…' : 'Save and sign in'}
+        {busy ? <><Spinner />Saving…</> : 'Save and sign in'}
       </button>
     </form>
   );
