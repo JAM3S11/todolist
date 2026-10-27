@@ -236,6 +236,8 @@ describe('profiles and invitations', () => {
     const db = as('reader', false);
     await assertSucceeds(getDocs(query(collection(db, 'invites'), where('to', '==', 'reader@test.com'))));
     await assertSucceeds(updateDoc(doc(db, 'invites', 'i1'), { seen: true }));
+    await assertSucceeds(updateDoc(doc(db, 'invites', 'i1'), { seen: false })); // mark as unread
+    await assertFails(updateDoc(doc(db, 'invites', 'i1'), { seen: 'yes' }));
     await assertFails(updateDoc(doc(db, 'invites', 'i1'), { listTitle: 'Changed' }));
     await assertSucceeds(deleteDoc(doc(db, 'invites', 'i1')));
   });

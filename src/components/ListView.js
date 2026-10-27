@@ -18,6 +18,7 @@ import DuePicker from './DuePicker';
 import TaskItem from './TaskItem';
 import Comments from './Comments';
 import ShareModal from './ShareModal';
+import Loading from './Loading';
 
 export default function ListView({ list, role, user, contacts, onLeave, onDelete, onArchive, menu }) {
   const toast = useToast();
@@ -28,6 +29,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
   const [tasks, setTasks] = useState(null);
   const [comments, setComments] = useState([]);
   const [showArchived, setShowArchived] = useState(false);
+  const [pane, setPane] = useState('tasks'); // phones show Tasks or Comments, one at a time
   const [shareOpen, setShareOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(list.title);
@@ -110,7 +112,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
 
   return (
     <div className="list-wrap">
-      <header className="bar">
+      <header className="bar lv-bar">
         <div className="bar-left">
           {renaming ? (
             <form onSubmit={saveTitle} className="rename">
@@ -126,13 +128,18 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
           </div>
         </div>
         <div className="bar-right">
-          <div className="avatars">
+          <div className="avatars" title={`${everyone.length} ${everyone.length === 1 ? 'person' : 'people'} with access`}>
             {everyone.slice(0, 6).map((p) => <Avatar key={p.email} person={p} size={30} />)}
+            {everyone.length > 6 && <span className="av av-more">+{everyone.length - 6}</span>}
           </div>
           {isOwner ? (
             <>
-              <button className="btn" type="button" onClick={() => setRenaming(true)}>Rename</button>
-              <button className="btn primary" type="button" onClick={() => setShareOpen(true)}>Share</button>
+              {/* on phones Rename lives in the ⋮ menu ("Edit name") */}
+              <button className="btn lv-rename" type="button" onClick={() => setRenaming(true)}>Rename</button>
+              <button className="btn primary" type="button" onClick={() => setShareOpen(true)}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M9 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8zM19 8v6M22 11h-6" /></svg>
+                Share
+              </button>
             </>
           ) : (
             <button className="btn" type="button" onClick={() => onLeave(list)}>Leave list</button>
@@ -154,8 +161,20 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
         </div>
       )}
 
-      <div className={comment ? 'grid' : 'grid solo'}>
-        <section className="panel">
+      {/* phones: Tasks and Comments as two tabs instead of one long page */}
+      {comment && (
+        <div className="seg lv-tabs" role="tablist" aria-label="List sections">
+          <button type="button" role="tab" aria-selected={pane === 'tasks'} className={pane === 'tasks' ? 'on' : ''} onClick={() => setPane('tasks')}>
+            Tasks <span>{tasks ? `${active.filter((t) => t.done).length}/${active.length}` : '…'}</span>
+          </button>
+          <button type="button" role="tab" aria-selected={pane === 'comments'} className={pane === 'comments' ? 'on' : ''} onClick={() => setPane('comments')}>
+            Comments <span>{comments.length}</span>
+          </button>
+        </div>
+      )}
+
+      <div className={`${comment ? 'grid' : 'grid solo'} show-${pane}`}>
+        <section className="panel lv-tasks">
           <div className="panel-h">
             <h2>Tasks</h2>
             <span className="count">{tasks ? `${active.filter((t) => t.done).length}/${active.length} done` : ''}</span>
@@ -163,14 +182,18 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
 
           {write && (
             <form className="add" onSubmit={onAdd}>
-              <input id="new-task" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task" autoComplete="off" maxLength={500} />
+              <input id="new-task" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task" autoComplete="off" maxLength={500}
+                enterKeyHint="done" />
               <DuePicker value={newDue} onChange={setNewDue} compact />
-              <button className="btn primary" type="submit">Add</button>
+              <button className="btn primary" type="submit" aria-label="Add task">
+                <svg className="add-plus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+                <span className="add-l">Add</span>
+              </button>
             </form>
           )}
 
           <ul className="tasks">
-            {tasks === null && <li className="empty">Loading tasks…</li>}
+            {tasks === null && <li className="empty"><Loading hint="Getting your tasks" /></li>}
             {tasks && active.length === 0 && <li className="empty">No open tasks.{write ? ' Add one above.' : ''}</li>}
             {active.map((t) => <TaskItem key={t.id} {...taskProps(t)} />)}
           </ul>

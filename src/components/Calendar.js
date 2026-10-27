@@ -1,14 +1,17 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { addTask, updateTask, watchTasks } from '@/lib/data';
+import { addTask, createList, updateTask, watchTasks } from '@/lib/data';
 import {
   DEFAULT_MINS, DURATIONS, TIMES, addDays, dueLabel, durLabel, fromKey, fromMin, isOverdue, longDay, monthDays,
   monthTitle, snap, timeRange, toKey, toMin, todayKey, weekday,
 } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
+import { useHolidayCountries, useHolidayCountry, useHolidays } from '@/lib/holidays';
 import { canWrite } from '@/lib/permissions';
 import { colorFor, initials, toDate } from '@/lib/people';
 import DuePicker from './DuePicker';
+import Loading, { Spinner } from './Loading';
+import Select, { inDropdown } from './Select';
 import { useToast } from './Toast';
 
 const HEADS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -56,7 +59,7 @@ function useNarrow() {
 const sameMonth = (key, [y, m]) => fromKey(key).getFullYear() === y && fromKey(key).getMonth() === m;
 const monthOf = (key) => [fromKey(key).getFullYear(), fromKey(key).getMonth()];
 const clamp = (n, lo, hi) => Math.max(lo, Math.min(hi, n));
-const typing = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"]');
+const typing = (el) => !!el?.closest?.('input, textarea, select, [contenteditable="true"], .sel, [role="listbox"]');
 
 // Where the pointer is: a time column in Week view (day + minute), a day box, or the all-day row
 function targetAt(x, y) {
@@ -75,9 +78,11 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   const toast = useToast();
   const narrow = useNarrow();
   const today = todayKey();
-  const [view, setView] = useState('month');
+  const [view, setView] = useState('month'); // 'month' | 'week' | 'year' (12 months) | 'years' (pick a year)
   const [cursor, setCursor] = useState(today); // the focused / selected day
   const [ym, setYm] = useState(() => monthOf(today)); // the month on screen
+  const [country, setCountry] = useHolidayCountry();
+  const holidays = useHolidays(ym[0], country);
   const [query, setQuery] = useState('');
   const [hidden, setHidden] = useState(() => new Set()); // list ids filtered out
   const [sort, setSort] = useState('manual');
@@ -90,6 +95,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   const previewRef = useRef(null);
   const setPreview = (p) => { previewRef.current = p; setPreviewState(p); };
   const grid = useRef(null);
+  const searchRef = useRef(null);
   const focusNext = useRef(false);
   const drag = useRef(null);
   const justDragged = useRef(false);
@@ -107,7 +113,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   for (const e of entries) if (e.t.due) byDay.set(e.t.due, [...(byDay.get(e.t.due) || []), e]);
   for (const items of byDay.values()) items.sort(inDay);
   const undated = entries.filter((e) => !e.t.due && !e.t.done).sort(sorter);
-  const canAdd = lists.some((l) => canWrite(l.role));
+  const canAdd = !!user; // a new task can always go into a new list of your own
   const loading = visibleLists.some((l) => !(l.id in byList));
 
   // ---- changes
@@ -231,7 +237,9 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   // ---- moving around
   const step = view === 'week' ? (narrow ? 3 : 7) : 0;
   function shift(dir) {
-    if (view === 'month') {
+    if (view === 'year' || view === 'years') {
+      setYm(([yr, mo]) => [yr + dir * (view === 'year' ? 1 : 12), mo]);
+    } else if (view === 'month') {
       const d = new Date(ym[0], ym[1] + dir, 1);
       setYm([d.getFullYear(), d.getMonth()]);
       setCursor(toKey(d));
@@ -244,6 +252,22 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   function goToday() {
     setCursor(today);
     setYm(monthOf(today));
+  }
+  // Year and years views: pick a month (today, or the 1st), a day, or a year
+  function pickMonth(mo) {
+    const yr = ym[0];
+    setYm([yr, mo]);
+    if (!sameMonth(cursor, [yr, mo])) setCursor(sameMonth(today, [yr, mo]) ? today : toKey(new Date(yr, mo, 1)));
+    setView('month');
+  }
+  function pickDay(key) {
+    setCursor(key);
+    setYm(monthOf(key));
+    setView('month');
+  }
+  function pickYear(yr) {
+    setYm(([, mo]) => [yr, mo]);
+    setView('year');
   }
   function moveCursor(next) {
     focusNext.current = true;
@@ -269,7 +293,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
     }
   }
 
-  // Shortcuts, like Google Calendar: C create · M month · W week · T today · J / K next / previous
+  // Shortcuts, like Google Calendar: C create · M month · W week · Y year · T today · / search · J / K next / previous
   const keys = useRef(null);
   keys.current = { shift, goToday, cursor, canAdd, busy: !!(creating || quick || panel || pop || tray) };
   useEffect(() => {
@@ -280,6 +304,8 @@ export default function Calendar({ lists, byList, user, onOpen }) {
       if (key === 'c' && k.canAdd) setCreating({ due: k.cursor });
       else if (key === 'm') setView('month');
       else if (key === 'w') setView('week');
+      else if (key === 'y') setView('year');
+      else if (key === '/') searchRef.current?.focus();
       else if (key === 't') { focusNext.current = true; k.goToday(); }
       else if (key === 'j' || key === 'n') k.shift(1);
       else if (key === 'k' || key === 'p') k.shift(-1);
@@ -303,7 +329,16 @@ export default function Calendar({ lists, byList, user, onOpen }) {
   const [y, m] = ym;
   const weekStart = narrow ? cursor : addDays(cursor, -weekday(fromKey(cursor)));
   const weekDays = Array.from({ length: narrow ? 3 : 7 }, (_, i) => addDays(weekStart, i));
-  const title = view === 'month' ? monthTitle(y, m) : rangeTitle(weekDays[0], weekDays[weekDays.length - 1]);
+  const yearsStart = y - (((y % 12) + 12) % 12); // 12 years a page: 2016–2027, 2028–2039…
+  const title = {
+    month: () => monthTitle(y, m),
+    week: () => rangeTitle(weekDays[0], weekDays[weekDays.length - 1]),
+    year: () => String(y),
+    years: () => `${yearsStart} – ${yearsStart + 11}`,
+  }[view]();
+  // Clicking the title zooms out: month or week → the year's months → a page of years
+  const zoomOut = { month: 'year', week: 'year', year: 'years' }[view];
+  const unit = { month: 'month', week: 'week', year: 'year', years: '12 years' }[view];
   const panelEntry = panel && (() => {
     const l = lists.find((x) => x.id === panel.listId);
     const t = (byList[panel.listId] || []).find((x) => x.id === panel.taskId);
@@ -316,7 +351,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
     role: 'gridcell',
     tabIndex: key === cursor ? 0 : -1,
     'aria-selected': key === cursor,
-    'aria-label': `${fromKey(key).toDateString()}${items.length ? `, ${items.length} task${items.length > 1 ? 's' : ''}` : ''}`,
+    'aria-label': `${fromKey(key).toDateString()}${holidays.byDay.has(key) ? `, ${holidays.byDay.get(key).name}` : ''}${items.length ? `, ${items.length} task${items.length > 1 ? 's' : ''}` : ''}`,
     onClick: dayClick(key),
     onFocus: () => setCursor(key),
     ...extra,
@@ -345,17 +380,27 @@ export default function Calendar({ lists, byList, user, onOpen }) {
 
       {/* Toolbar: Search · Filter · Sort · No date · + New task */}
       <div className="cal-toolbar">
-        <label className="cal-search">
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
-          <input type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks" aria-label="Search tasks" />
-        </label>
+        <div className={q ? 'cal-search has-q' : 'cal-search'} role="search"
+          onMouseDown={(e) => { if (!e.target.closest('input, button')) { e.preventDefault(); searchRef.current?.focus(); } }}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.5-3.5" /></svg>
+          <input ref={searchRef} type="search" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks"
+            aria-label="Search tasks" autoComplete="off" spellCheck={false}
+            onKeyDown={(e) => { if (e.key === 'Escape' && query) { e.stopPropagation(); setQuery(''); } }} />
+          {q ? (
+            <>
+              <span className="cal-search-n" aria-live="polite">{entries.length} found</span>
+              <button type="button" className="cal-search-x" onClick={() => { setQuery(''); searchRef.current?.focus(); }}
+                aria-label="Clear search" title="Clear (Esc)">
+                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6 6 18" /></svg>
+              </button>
+            </>
+          ) : (
+            <kbd className="cal-search-k" title="Press / to search">/</kbd>
+          )}
+        </div>
         <FilterMenu lists={lists} hidden={hidden} setHidden={setHidden} />
-        <label className="cal-sort">
-          <span>Sort:</span>
-          <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort tasks">
-            {Object.entries(SORTS).map(([k, label]) => <option key={k} value={k}>{label}</option>)}
-          </select>
-        </label>
+        <Select className="cal-sort" value={sort} onChange={setSort} label="Sort tasks" prefix="Sort:"
+          options={Object.entries(SORTS).map(([k, label]) => ({ value: k, label }))} />
         <button type="button" className={tray ? 'btn cal-nodate on' : 'btn cal-nodate'} onClick={() => { setPanel(null); setTray((o) => !o); }}
           aria-expanded={tray}>
           No date<span className="cal-count">{undated.length}</span>
@@ -371,14 +416,23 @@ export default function Calendar({ lists, byList, user, onOpen }) {
         <div className="cal-hbar-l">
           <button className="btn cal-today" type="button" onClick={goToday} title="Today (T)">Today</button>
           <button className="btn sq" type="button" onClick={() => shift(-1)} title="Previous (K)"
-            aria-label={view === 'month' ? 'Previous month' : 'Previous week'}>‹</button>
+            aria-label={`Previous ${unit}`}>‹</button>
           <button className="btn sq" type="button" onClick={() => shift(1)} title="Next (J)"
-            aria-label={view === 'month' ? 'Next month' : 'Next week'}>›</button>
-          <h2 aria-live="polite">{title}</h2>
+            aria-label={`Next ${unit}`}>›</button>
+          <h2 aria-live="polite">
+            {zoomOut ? (
+              <button type="button" className="cal-title" onClick={() => setView(zoomOut)}
+                title={zoomOut === 'year' ? 'See every month of the year' : 'Pick another year'}>
+                {title}
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6" /></svg>
+              </button>
+            ) : title}
+          </h2>
         </div>
         <div className="seg" role="tablist" aria-label="Calendar view">
-          {[['month', 'Month', 'M'], ['week', 'Week', 'W']].map(([k, label, key]) => (
-            <button key={k} type="button" role="tab" aria-selected={view === k} className={view === k ? 'on' : ''}
+          {[['month', 'Month', 'M'], ['week', 'Week', 'W'], ['year', 'Year', 'Y']].map(([k, label, key]) => (
+            <button key={k} type="button" role="tab" aria-selected={view === k || (k === 'year' && view === 'years')}
+              className={view === k || (k === 'year' && view === 'years') ? 'on' : ''}
               title={`${label} (${key})`} onClick={() => { setView(k); setYm(monthOf(cursor)); }}>{label}</button>
           ))}
         </div>
@@ -392,11 +446,15 @@ export default function Calendar({ lists, byList, user, onOpen }) {
               <div className="cal-row" role="row" key={week[0]}>
                 {week.map((key) => {
                   const items = byDay.get(key) || [];
-                  const cls = ['cal-day', !sameMonth(key, ym) && 'out', key === today && 'today', key === cursor && 'sel',
+                  const hol = holidays.byDay.get(key);
+                  const cls = ['cal-day', !sameMonth(key, ym) && 'out', key === today && 'today', key === cursor && 'sel', hol && 'holiday',
                     dropDay === key && 'drop', quick?.day === key && quick.start == null && 'pending'].filter(Boolean).join(' ');
                   return (
                     <div key={key} className={cls} {...cellProps(key, items)}>
-                      <span className="cal-num">{fromKey(key).getDate()}</span>
+                      <div className="cal-day-h">
+                        <span className="cal-num">{fromKey(key).getDate()}</span>
+                        {hol && <span className="cal-hol" title={`Public holiday: ${hol.name}`}>{hol.name}</span>}
+                      </div>
                       <div className="cal-chips">
                         {quick?.day === key && quick.start == null && <span className="chip ghost-chip">(No title)</span>}
                         {dayChips(key, items)}
@@ -411,10 +469,15 @@ export default function Calendar({ lists, byList, user, onOpen }) {
             ))}
           </div>
         </section>
-      ) : (
-        <WeekView days={weekDays} today={today} byDay={byDay} preview={preview} dropDay={dropDay} quick={quick}
+      ) : view === 'week' ? (
+        <WeekView days={weekDays} today={today} byDay={byDay} holidays={holidays.byDay} preview={preview} dropDay={dropDay} quick={quick}
           grid={grid} onKey={onGridKey} cellProps={cellProps} dayChips={dayChips}
           dragProps={dragProps} resizeDown={resizeDown} createDown={createDown} canAdd={canAdd} />
+      ) : view === 'year' ? (
+        <YearView year={y} today={today} cursor={cursor} byDay={byDay} holidays={holidays} country={country}
+          setCountry={setCountry} onPickMonth={pickMonth} onPickDay={pickDay} />
+      ) : (
+        <YearsView start={yearsStart} current={fromKey(today).getFullYear()} selected={y} byDay={byDay} onPick={pickYear} />
       )}
 
       {/* Phones: the selected day's tasks under the month */}
@@ -424,12 +487,15 @@ export default function Calendar({ lists, byList, user, onOpen }) {
             <h3>{cursor === today ? `Today · ${longDay(cursor)}` : longDay(cursor)}</h3>
             {canAdd && <button type="button" className="link" onClick={() => setCreating({ due: cursor })}>+ Add</button>}
           </div>
+          {holidays.byDay.has(cursor) && <p className="cal-hol-line">🎉 Public holiday: {holidays.byDay.get(cursor).name}</p>}
           {(byDay.get(cursor) || []).length ? (
             <ul className="cal-rows">
               {(byDay.get(cursor) || []).map((e) => <TaskRow key={`${e.l.id}/${e.t.id}`} entry={e} actions={actions} />)}
             </ul>
+          ) : loading ? (
+            <Loading hint="Getting your tasks" />
           ) : (
-            <p className="cal-empty">{loading ? 'Loading tasks…' : 'Nothing due on this day.'}</p>
+            <p className="cal-empty">Nothing due on this day.</p>
           )}
         </section>
       )}
@@ -521,7 +587,7 @@ function layoutDay(items) {
   return out;
 }
 
-function WeekView({ days, today, byDay, preview, dropDay, quick, grid, onKey, cellProps, dayChips, dragProps, resizeDown, createDown, canAdd }) {
+function WeekView({ days, today, byDay, holidays, preview, dropDay, quick, grid, onKey, cellProps, dayChips, dragProps, resizeDown, createDown, canAdd }) {
   const [now, setNow] = useState(() => new Date());
   const body = useRef(null);
   useEffect(() => {
@@ -548,9 +614,11 @@ function WeekView({ days, today, byDay, preview, dropDay, quick, grid, onKey, ce
         <span />
         {days.map((k) => {
           const d = fromKey(k);
+          const hol = holidays.get(k);
           return (
             <span key={k} className={k === today ? 'today' : ''}>
               {HEADS[weekday(d)]} <b>{d.getDate()}</b>
+              {hol && <em className="wk-hol" title={`Public holiday: ${hol.name}`}>{hol.name}</em>}
             </span>
           );
         })}
@@ -616,6 +684,118 @@ function WeekView({ days, today, byDay, preview, dropDay, quick, grid, onKey, ce
   );
 }
 
+// The 12 months of a year (click a month or a day to open it), with that year's public holidays beside them
+function YearView({ year, today, cursor, byDay, holidays, country, setCountry, onPickMonth, onPickDay }) {
+  const countries = useHolidayCountries();
+  const next = holidays.list.find((h) => h.date >= today); // the next one coming up, if it's in this year
+  const fmt = (key, opts) => fromKey(key).toLocaleDateString('en-GB', opts);
+
+  return (
+    <div className="yr">
+      <section className="yr-grid" aria-label={`Months of ${year}`}>
+        {Array.from({ length: 12 }, (_, mo) => (
+          <MiniMonth key={mo} year={year} month={mo} today={today} cursor={cursor} byDay={byDay} holidays={holidays.byDay}
+            onPickMonth={onPickMonth} onPickDay={onPickDay} />
+        ))}
+      </section>
+
+      <aside className="yr-hols" aria-label={`Public holidays in ${year}`}>
+        <div className="yr-hols-h">
+          <h3>Public holidays in {year}</h3>
+          <Select className="block" value={country} onChange={setCountry} label="Country" placement="bottom end"
+            options={(countries.length ? countries : [{ countryCode: country, name: country }])
+              .map((c) => ({ value: c.countryCode, label: c.name, hint: c.countryCode }))} />
+        </div>
+        {holidays.status === 'loading' && <Loading hint={`Public holidays for ${year}`} />}
+        {holidays.status === 'error' && <p className="cal-empty">Couldn&apos;t load the holidays. Check your connection and try again.</p>}
+        {holidays.status === 'ok' && !holidays.list.length && <p className="cal-empty">No public holidays listed for {year}.</p>}
+        {holidays.list.length > 0 && (
+          <ul className="yr-hol-list">
+            {holidays.list.map((h) => {
+              const cls = ['yr-hol', h.date < today && 'past', h === next && 'next'].filter(Boolean).join(' ');
+              return (
+                <li key={h.date}>
+                  <button type="button" className={cls} onClick={() => onPickDay(h.date)}>
+                    <span className="yr-hol-d">
+                      <b>{fromKey(h.date).getDate()}</b>{fmt(h.date, { month: 'short' })}
+                    </span>
+                    <span className="yr-hol-b">
+                      <span className="yr-hol-n">{h.name}</span>
+                      <span className="yr-hol-m">
+                        {fmt(h.date, { weekday: 'long' })}
+                        {h.localName && h.localName !== h.name && ` · ${h.localName}`}
+                        {h.date === today ? ' · today' : h === next ? ' · next' : ''}
+                      </span>
+                    </span>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+        <p className="cal-hint">Holidays from Nager.Date. Some dates (like Eid) are only announced close to the day and may be missing.</p>
+      </aside>
+    </div>
+  );
+}
+
+function MiniMonth({ year, month, today, cursor, byDay, holidays, onPickMonth, onPickDay }) {
+  const days = monthDays(year, month);
+  const name = new Date(year, month, 1).toLocaleDateString('en-GB', { month: 'long' });
+  const inMonth = days.filter((d) => d.getMonth() === month).map(toKey);
+  const open = inMonth.reduce((n, key) => n + (byDay.get(key) || []).filter((e) => !e.t.done).length, 0);
+  const isNow = sameMonth(today, [year, month]);
+
+  return (
+    <div className={isNow ? 'mm now' : 'mm'}>
+      <button type="button" className="mm-h" onClick={() => onPickMonth(month)} aria-label={`Open ${name} ${year}`}>
+        <b>{name}</b>
+        {open > 0 && <span className="mm-c">{open} open</span>}
+      </button>
+      <div className="mm-heads" aria-hidden="true">{HEADS.map((h) => <span key={h}>{h[0]}</span>)}</div>
+      <div className="mm-days">
+        {days.map((d) => {
+          const key = toKey(d);
+          if (d.getMonth() !== month) return <span key={key} className="mm-d out" aria-hidden="true" />;
+          const hol = holidays.get(key);
+          const n = (byDay.get(key) || []).length;
+          const cls = ['mm-d', weekday(d) >= 5 && 'wkend', key === today && 'today', key === cursor && 'sel', hol && 'holiday'].filter(Boolean).join(' ');
+          const label = [longDay(key), hol && `public holiday: ${hol.name}`, n && `${n} task${n > 1 ? 's' : ''}`].filter(Boolean).join(', ');
+          return (
+            <button key={key} type="button" className={cls} title={label} aria-label={label} onClick={() => onPickDay(key)}>
+              {d.getDate()}
+              {n > 0 && <i aria-hidden="true" />}
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// A page of 12 years: pick one to see its months
+function YearsView({ start, current, selected, byDay, onPick }) {
+  const tasksIn = (yr) => {
+    let n = 0;
+    for (const [key, items] of byDay) if (key.startsWith(`${yr}-`)) n += items.length;
+    return n;
+  };
+  return (
+    <section className="yrs" aria-label={`Years ${start} to ${start + 11}`}>
+      {Array.from({ length: 12 }, (_, i) => start + i).map((yr) => {
+        const n = tasksIn(yr);
+        return (
+          <button key={yr} type="button" className={['yrs-y', yr === current && 'now', yr === selected && 'sel'].filter(Boolean).join(' ')}
+            onClick={() => onPick(yr)} aria-current={yr === current ? 'date' : undefined}>
+            <b>{yr}</b>
+            <span>{n ? `${n} task${n > 1 ? 's' : ''}` : yr === current ? 'This year' : ''}</span>
+          </button>
+        );
+      })}
+    </section>
+  );
+}
+
 // "All day" or a start time + length
 function TimeFields({ start, mins, onChange, idPrefix }) {
   const allDay = !start;
@@ -628,14 +808,52 @@ function TimeFields({ start, mins, onChange, idPrefix }) {
       </label>
       {!allDay && (
         <>
-          <select id={`${idPrefix}-start`} value={start} onChange={(e) => onChange({ start: e.target.value, mins })} aria-label="Start time">
-            {(TIMES.includes(start) ? TIMES : [start, ...TIMES]).map((t) => <option key={t} value={t}>{t}</option>)}
-          </select>
+          <Select id={`${idPrefix}-start`} className="time-sel" value={start} onChange={(v) => onChange({ start: v, mins })} label="Start time"
+            options={(TIMES.includes(start) ? TIMES : [start, ...TIMES]).map((t) => ({ value: t, label: t }))} />
           <span className="time-for">for</span>
-          <select id={`${idPrefix}-mins`} value={mins} onChange={(e) => onChange({ start, mins: Number(e.target.value) })} aria-label="Length">
-            {(DURATIONS.includes(mins) ? DURATIONS : [mins, ...DURATIONS]).map((d) => <option key={d} value={d}>{durLabel(d)}</option>)}
-          </select>
+          <Select id={`${idPrefix}-mins`} className="time-sel" value={mins} onChange={(v) => onChange({ start, mins: v })} label="Length"
+            options={(DURATIONS.includes(mins) ? DURATIONS : [mins, ...DURATIONS]).map((d) => ({ value: d, label: durLabel(d) }))} />
         </>
+      )}
+    </div>
+  );
+}
+
+// Which list a new task goes into: one you can write to, or a new list made on save
+const NEW_LIST = '__new';
+function useListChoice(lists, init = {}) {
+  const [listId, setListId] = useState(
+    init.listId === NEW_LIST || lists.some((l) => l.id === init.listId) ? init.listId : lists[0]?.id || NEW_LIST);
+  const [newName, setNewName] = useState(init.newName || '');
+  const made = useRef(null); // { name, id }: the list already made, if saving the task then failed (so a retry doesn't make a second one)
+  const isNew = listId === NEW_LIST;
+  const name = newName.trim();
+  return {
+    listId, setListId, newName, setNewName, isNew,
+    problem: () => (isNew && !name ? 'Give the new list a name.' : null),
+    title: isNew ? name : lists.find((l) => l.id === listId)?.title,
+    // the list's id, creating it first if it's new
+    resolve: async (user) => {
+      if (!isNew) return listId;
+      if (made.current?.name !== name) made.current = { name, id: await createList(user, name) };
+      return made.current.id;
+    },
+  };
+}
+
+function ListPicker({ lists, choice, idPrefix, compact }) {
+  return (
+    <div className={compact ? 'list-pick compact' : 'list-pick'}>
+      <Select id={`${idPrefix}-list`} className="block" value={choice.listId} onChange={choice.setListId} label="List"
+        prefix={choice.isNew ? null : <i className="sel-dot" style={{ background: colorFor(choice.listId) }} />}
+        options={[
+          ...lists.map((l) => ({ value: l.id, label: l.title })),
+          { value: NEW_LIST, label: '＋ New list…', divider: lists.length > 0 },
+        ]} />
+      {choice.isNew && (
+        <input id={`${idPrefix}-new-list`} autoFocus={lists.length > 0} maxLength={120} value={choice.newName}
+          onChange={(e) => choice.setNewName(e.target.value)} placeholder="Name the new list, e.g. Moving house"
+          aria-label="New list name" autoComplete="off" />
       )}
     </div>
   );
@@ -646,7 +864,7 @@ function QuickCreate({ quick, lists, user, onClose, onMore }) {
   const toast = useToast();
   const box = useRef(null);
   const [text, setText] = useState('');
-  const [listId, setListId] = useState(lists[0]?.id);
+  const choice = useListChoice(lists);
   const [time, setTime] = useState({ start: quick.start, mins: quick.mins });
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState('');
@@ -657,16 +875,18 @@ function QuickCreate({ quick, lists, user, onClose, onMore }) {
   const roomRight = window.innerWidth - r.right - 12 >= W;
   const left = roomRight ? r.right + 8 : Math.max(8, r.left - W - 8 >= 8 ? r.left - W - 8 : window.innerWidth - W - 8);
   const top = clamp(r.top, 8, window.innerHeight - 380);
-  const more = (tab) => onMore({ due: quick.day, start: time.start, mins: time.mins, text, listId, tab });
+  const more = (tab) => onMore({ due: quick.day, start: time.start, mins: time.mins, text, listId: choice.listId, newName: choice.newName, tab });
 
   async function save(e) {
     e.preventDefault();
     const v = text.trim();
     if (!v) return setErr('Add a title first.');
+    if (choice.problem()) return setErr(choice.problem());
     setBusy(true);
     try {
+      const listId = await choice.resolve(user);
       await addTask(listId, user, v, quick.day, '', time.start ? time : null);
-      toast(`Added for ${dueLabel(quick.day).toLowerCase()}${time.start ? `, ${timeRange(time.start, time.mins)}` : ''}`);
+      toast(`Added${choice.isNew ? ` to the new list “${choice.title}”` : ''} for ${dueLabel(quick.day).toLowerCase()}${time.start ? `, ${timeRange(time.start, time.mins)}` : ''}`);
       onClose();
     } catch (er) {
       setErr(friendlyError(er));
@@ -688,19 +908,17 @@ function QuickCreate({ quick, lists, user, onClose, onMore }) {
           <TimeFields start={time.start} mins={time.mins} onChange={setTime} idPrefix="qc" />
         </div>
       </div>
-      {lists.length > 1 && (
-        <div className="qc-row">
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
-          <select value={listId} onChange={(e) => setListId(e.target.value)} aria-label="List">
-            {lists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
-          </select>
-        </div>
+      <div className="qc-row">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M8 6h13M8 12h13M8 18h13M3 6h.01M3 12h.01M3 18h.01" /></svg>
+        <ListPicker lists={lists} choice={choice} idPrefix="qc" compact />
+      </div>
+      {lists.length > 0 && (
+        <button type="button" className="link qc-existing" onClick={() => more('existing')}>Schedule an existing task instead</button>
       )}
-      <button type="button" className="link qc-existing" onClick={() => more('existing')}>Schedule an existing task instead</button>
       {err && <p className="note err" role="alert">{err}</p>}
       <div className="qc-f">
         <button type="button" className="btn" onClick={() => more('new')}>More options</button>
-        <button type="submit" className="btn primary" disabled={busy}>{busy ? 'Saving…' : 'Save'}</button>
+        <button type="submit" className="btn primary" disabled={busy}>{busy ? <><Spinner aria-hidden="true" />Saving…</> : 'Save'}</button>
       </div>
     </form>
   );
@@ -742,8 +960,9 @@ function useClickAway(ref, active, onAway) {
   cb.current = onAway;
   useEffect(() => {
     if (!active) return;
-    const down = (e) => ref.current && !ref.current.contains(e.target) && cb.current();
-    const key = (e) => e.key === 'Escape' && cb.current();
+    // a drop-down's options sit outside the popover; picking one, or Escape to close it, keeps the popover open
+    const down = (e) => ref.current && !ref.current.contains(e.target) && !inDropdown(e.target) && cb.current();
+    const key = (e) => e.key === 'Escape' && !inDropdown(e.target) && cb.current();
     document.addEventListener('mousedown', down);
     document.addEventListener('keydown', key);
     return () => {
@@ -898,12 +1117,12 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
   const [mine, setMine] = useState(true);
   const [picked, setPicked] = useState(null); // 'listId/taskId'
   // new
-  const [listId, setListId] = useState(lists.some((l) => l.id === init.listId) ? init.listId : lists[0]?.id);
+  const choice = useListChoice(lists, init);
   const [text, setText] = useState(init.text || '');
   const [notes, setNotes] = useState('');
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => e.key === 'Escape' && !inDropdown(e.target) && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -936,10 +1155,12 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
     }
     const v = text.trim();
     if (!v) return setErr('Write the task first.');
+    if (choice.problem()) return setErr(choice.problem());
     setBusy(true);
     try {
+      const listId = await choice.resolve(user);
       await addTask(listId, user, v, due, notes.trim(), start ? { start, mins: time.mins } : null);
-      toast(`Added to “${lists.find((l) => l.id === listId)?.title}”${due ? `, due ${dueLabel(due).toLowerCase()}` : ''}`);
+      toast(`Added to ${choice.isNew ? 'the new list ' : ''}“${choice.title}”${due ? `, due ${dueLabel(due).toLowerCase()}` : ''}`);
       onClose();
     } catch (er) {
       setErr(friendlyError(er));
@@ -1022,12 +1243,11 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
                 <textarea id="cal-task-notes" rows={3} maxLength={2000} value={notes} onChange={(e) => setNotes(e.target.value)}
                   placeholder="Details, steps, links…" />
               </label>
-              <label className="field">
-                <span>List</span>
-                <select id="cal-task-list" value={listId} onChange={(e) => setListId(e.target.value)}>
-                  {lists.map((l) => <option key={l.id} value={l.id}>{l.title}</option>)}
-                </select>
-              </label>
+              <div className="field">
+                <label htmlFor="cal-task-list">List</label>
+                <ListPicker lists={lists} choice={choice} idPrefix="cal-task" />
+                {choice.isNew && <span className="list-pick-note">A new list of your own is made when you add the task. You can share it later.</span>}
+              </div>
             </>
           )}
 
@@ -1045,7 +1265,7 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
         </div>
         <div className="m-f end">
           <button className="btn" type="button" onClick={onClose}>Cancel</button>
-          <button className="btn primary" type="submit" disabled={busy}>{busy ? 'Saving…' : action}</button>
+          <button className="btn primary" type="submit" disabled={busy}>{busy ? <><Spinner aria-hidden="true" />Saving…</> : action}</button>
         </div>
       </form>
     </div>

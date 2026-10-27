@@ -5,6 +5,7 @@ import { changeAccess, clearLeft, emailOf, queueInviteEmails, removeAccess, shar
 import { appUrl } from '@/lib/appUrl';
 import { EMAIL_RE, PERMISSIONS } from '@/lib/permissions';
 import { Avatar, displayName } from '@/lib/people';
+import Select, { inDropdown } from './Select';
 import { useToast } from './Toast';
 
 // Opens the sharer's own email app with the invitation filled in
@@ -31,7 +32,7 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
   const listLink = appUrl(`/?list=${list.id}`);
 
   useEffect(() => {
-    const onKey = (e) => e.key === 'Escape' && onClose();
+    const onKey = (e) => e.key === 'Escape' && !inDropdown(e.target) && onClose();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
   }, [onClose]);
@@ -224,10 +225,12 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
                     <div className="arow" key={m.email}>
                       <Avatar person={p} size={28} />
                       <span className="nm" title={m.email}>{displayName(p)}</span>
-                      <select id={`access-${m.email}`} value={m.permission} onChange={(e) => onAccessChange(m, e.target.value)} aria-label={`Access for ${m.email}`}>
-                        {Object.entries(PERMISSIONS).map(([k, x]) => <option key={k} value={k}>{x.label}</option>)}
-                        <option value="__remove">Remove access</option>
-                      </select>
+                      <Select id={`access-${m.email}`} className="access-sel" value={m.permission} onChange={(v) => onAccessChange(m, v)}
+                        label={`Access for ${m.email}`} placement="bottom end"
+                        options={[
+                          ...Object.entries(PERMISSIONS).map(([k, x]) => ({ value: k, label: x.label })),
+                          { value: '__remove', label: 'Remove access', danger: true, divider: true },
+                        ]} />
                     </div>
                   );
                 })}

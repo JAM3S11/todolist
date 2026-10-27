@@ -6,7 +6,6 @@ import {
   archiveList,
   createList,
   deleteList,
-  dismissInvite,
   emailOf,
   getLastListId,
   leaveList,
@@ -29,8 +28,9 @@ import Calendar, { dueNowCount, taskEntries, useAllTasks } from './Calendar';
 import Emblem from './Emblem';
 import ListDialog from './ListDialogs';
 import ListMenu from './ListMenu';
-import Notifications from './Notifications';
+import Notifications, { NotificationsPage, useNotifications } from './Notifications';
 import ListView from './ListView';
+import Loading from './Loading';
 import { ToastProvider, useToast } from './Toast';
 
 export default function Workspace(props) {
@@ -44,7 +44,7 @@ export default function Workspace(props) {
 // Signing in lands on "My List" (the board), unless a shared link (?list=…) points at one list
 function initialView() {
   const q = new URLSearchParams(window.location.search);
-  if (q.get('view') === 'calendar') return 'calendar';
+  if (q.get('view') === 'calendar' || q.get('view') === 'notifications') return q.get('view');
   return q.get('view') === 'board' || !q.get('list') ? 'board' : 'list';
 }
 
@@ -151,18 +151,23 @@ function WorkspaceInner({ user }) {
     })();
   }, [lists, user.uid, toast]);
 
-  // ---- opening a shared list (from the link, a notification or the sidebar) marks its notification as read
+  // ---- opening a shared list (from the link, a notification or the sidebar) marks its notification as read,
+  // once per visit, so "Mark as unread" while the list is open sticks
+  const seenFor = useRef(null);
   useEffect(() => {
-    if (view !== 'list') return;
+    if (view !== 'list') { seenFor.current = null; return; }
+    if (seenFor.current === activeId) return;
     const inv = invites.find((i) => i.listId === activeId && !i.seen);
-    if (inv) markInviteSeen(inv.id).catch(() => {});
+    if (!inv) return;
+    seenFor.current = activeId;
+    markInviteSeen(inv.id).catch(() => {});
   }, [invites, activeId, view]);
 
   // ---- remember the open list and view in the address bar, and the list in the database
   useEffect(() => {
     const url = new URL(window.location.href);
     if (activeId) url.searchParams.set('list', activeId);
-    if (view === 'board' || view === 'calendar') url.searchParams.set('view', view);
+    if (view === 'board' || view === 'calendar' || view === 'notifications') url.searchParams.set('view', view);
     else url.searchParams.delete('view');
     window.history.replaceState(null, '', url);
     if (activeId) saveLastListId(user.uid, activeId).catch(() => {});
@@ -231,15 +236,6 @@ function WorkspaceInner({ user }) {
     signOut(fb().auth);
   }
 
-  // Notifications only for lists I can still open (not deleted, access not removed)
-  const notes = useMemo(() => {
-    const open = new Map((shared || []).map((l) => [l.id, l]));
-    return invites
-      .filter((i) => open.has(i.listId))
-      .map((i) => ({ ...i, listTitle: open.get(i.listId).title, role: open.get(i.listId).roles?.[email] }))
-      .sort((a, b) => toDate(b.createdAt) - toDate(a.createdAt));
-  }, [invites, shared, email]);
-
   const active = lists?.find((l) => l.id === activeId) || null;
   const dialogList = dialog && lists?.find((l) => l.id === dialog.id);
   // My own drag order once I've set one (new lists go after it), else favourites first; most recently changed breaks ties
@@ -250,8 +246,12 @@ function WorkspaceInner({ user }) {
   const arranged = arrange(lists || []);
   // Tasks of every open list, live: the calendar shows them, the sidebar counts what's due
   const openLists = arranged.filter((l) => !l.archived);
-  const allTasks = useAllTasks(openLists);
+  // every list's tasks (archived too, so My List can search them); the calendar only uses the open lists'
+  const allTasks = useAllTasks(arranged);
   const dueNow = dueNowCount(taskEntries(openLists, allTasks));
+  // Shares + due / overdue reminders, for the bell and the Notifications page
+  const notif = useNotifications({ invites, lists, tasksByList: allTasks, uid: user.uid });
+  const showNotifications = () => { setView('notifications'); setMenuOpen(false); };
   const mine = arranged.filter((l) => l.role === 'owner' && !l.archived);
   const others = arranged.filter((l) => l.role !== 'owner' && !l.archived);
   // From dragging on My List: the cards I moved, then everything else in its current place
@@ -282,7 +282,7 @@ function WorkspaceInner({ user }) {
             <span aria-hidden="true" />
           </button>
           <div className="brand"><Emblem size={28} /><span className="brand-name">Shared To-Do</span></div>
-          <Notifications notes={notes} onOpen={pick} onDismiss={(id) => dismissInvite(id).catch(() => {})} />
+          <Notifications api={notif} onOpen={pick} onViewAll={showNotifications} />
           <button className="side-btn collapse only-desktop" type="button" onClick={toggleRail}
             aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} title={rail ? 'Expand sidebar' : 'Collapse sidebar'}>
             <Icon name="sidebar" />
@@ -323,10 +323,15 @@ function WorkspaceInner({ user }) {
                     aria-label={`${dueNow} due today or overdue`}>{dueNow}</span>
                 )}
               </button>
+              <button type="button" className={view === 'notifications' ? 'nav-i on' : 'nav-i'} title="Notifications"
+                aria-current={view === 'notifications' ? 'page' : undefined} onClick={showNotifications}>
+                <Icon name="bell" /><span className="lbl">Notifications</span>
+                {notif.unread > 0 && <span className="count unread-count" aria-label={`${notif.unread} unread`}>{notif.unread}</span>}
+              </button>
             </nav>
 
             <ListGroup title="Owned by me" lists={mine} {...group}
-              empty={lists === null ? 'Loading…' : 'Press “New list” to create your first one.'} />
+              empty={lists === null ? <Loading variant="inline" /> : 'Press “New list” to create your first one.'} />
             <ListGroup title="Shared with me" lists={others} {...group}
               empty={lists === null ? '' : 'Lists people share with you appear here.'} />
 
@@ -356,11 +361,13 @@ function WorkspaceInner({ user }) {
 
       <main className="main" ref={mainRef}>
         {lists === null ? (
-          <div className="center muted">Loading your lists…</div>
+          <Loading variant="page" hint="Getting your lists ready" />
+        ) : view === 'notifications' ? (
+          <NotificationsPage api={notif} onOpen={pick} />
         ) : view === 'calendar' ? (
           <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
         ) : view === 'board' ? (
-          <Board lists={arranged} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)}
+          <Board lists={arranged} tasksByList={allTasks} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)}
             onReorder={onReorder} />
         ) : active ? (
           <ListView key={active.id} list={active} role={active.role} user={user} contacts={contacts}
@@ -434,6 +441,7 @@ const ICONS = {
   sidebar: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 10l-2 2 2 2" /></>,
   logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   close: <path d="M18 6 6 18M6 6l12 12" />,
+  bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
 };
 
 function Icon({ name }) {
