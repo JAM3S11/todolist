@@ -57,8 +57,11 @@ export default function Board({ lists, favorites, actions, onOpen, onNew, onReor
   function dragOver(e) {
     if (!drag?.id) return;
     // scroll the page when dragging near the top or bottom edge (long lists, phones)
-    if (e.clientY < 70) window.scrollBy(0, -14);
-    else if (e.clientY > window.innerHeight - 70) window.scrollBy(0, 14);
+    // (the main view scrolls on its own on desktop; on phones the page itself scrolls)
+    const main = document.querySelector('.main');
+    const scroller = main && getComputedStyle(main).overflowY === 'auto' ? main : window;
+    if (e.clientY < 70) scroller.scrollBy(0, -14);
+    else if (e.clientY > window.innerHeight - 70) scroller.scrollBy(0, 14);
     for (const [id, el] of cards.current) {
       if (id === drag.id) continue;
       const r = el.getBoundingClientRect();

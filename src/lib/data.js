@@ -201,12 +201,17 @@ export function watchTasks(listId, onData, onError) {
 
 const stamp = (user) => ({ updatedAt: serverTimestamp(), updatedBy: user.uid, updatedByName: nameOf(user) });
 
-export function addTask(listId, user, text) {
+// due: optional 'YYYY-MM-DD' (see lib/dates.js); notes: optional details of what's going to be done;
+// time: optional { start: 'HH:MM', mins } on that day (no time = all day)
+export function addTask(listId, user, text, due = null, notes = '', time = null) {
   const b = writeBatch(db());
   b.set(doc(tasksCol(listId)), {
     text,
     done: false,
     archived: false,
+    ...(due ? { due } : {}),
+    ...(notes ? { notes } : {}),
+    ...(due && time?.start ? { start: time.start, mins: time.mins || 60 } : {}),
     createdBy: user.uid,
     createdByName: nameOf(user),
     createdAt: serverTimestamp(),

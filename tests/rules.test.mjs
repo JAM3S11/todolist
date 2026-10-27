@@ -162,6 +162,22 @@ describe('tasks', () => {
     assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('owner'))));
   test('cannot add unexpected fields', () =>
     assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { hacked: true }))));
+  test('can give a task a due date', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: '2026-10-27' }))));
+  test('can clear a due date', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: null }))));
+  test('can give a task a time', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: '2026-10-27', start: '10:00', mins: 90 }))));
+  test('time must be HH:MM', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: '2026-10-27', start: '25:00', mins: 60 }))));
+  test('length must be 5 minutes to a day', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: '2026-10-27', start: '10:00', mins: 5000 }))));
+  test('can add notes to a task', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'Call ahead first' }))));
+  test('notes must be text of at most 2000 characters', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'x'.repeat(2001) }))));
+  test('due date must be YYYY-MM-DD', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: 'next tuesday' }))));
 });
 
 describe('comments', () => {

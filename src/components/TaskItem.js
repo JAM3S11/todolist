@@ -1,8 +1,9 @@
 'use client';
 import { useState } from 'react';
 import { timeAgo } from '@/lib/people';
+import DuePicker from './DuePicker';
 
-export default function TaskItem({ task, write, me, onToggle, onEdit, onArchive, onDelete }) {
+export default function TaskItem({ task, write, me, onToggle, onEdit, onDue, onArchive, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [text, setText] = useState(task.text);
   const [confirm, setConfirm] = useState(false);
@@ -40,7 +41,9 @@ export default function TaskItem({ task, write, me, onToggle, onEdit, onArchive,
         ) : (
           task.text
         )}
+        {task.notes && !editing && <p className="task-notes">{task.notes}</p>}
       </div>
+      <DuePicker value={task.due || null} task={task} canEdit={write && !task.archived} onChange={onDue} time={task.start || null} />
       <span className="by" title={`Updated ${timeAgo(task.updatedAt)}${edited}`}>{by}</span>
       {write && (
         <div className="acts">

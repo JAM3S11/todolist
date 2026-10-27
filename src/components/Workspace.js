@@ -25,6 +25,7 @@ import {
 import { roleLabel } from '@/lib/permissions';
 import { Avatar, colorFor, displayName, toDate } from '@/lib/people';
 import Board from './Board';
+import Calendar, { dueNowCount, taskEntries, useAllTasks } from './Calendar';
 import Emblem from './Emblem';
 import ListDialog from './ListDialogs';
 import ListMenu from './ListMenu';
@@ -43,6 +44,7 @@ export default function Workspace(props) {
 // Signing in lands on "My List" (the board), unless a shared link (?list=…) points at one list
 function initialView() {
   const q = new URLSearchParams(window.location.search);
+  if (q.get('view') === 'calendar') return 'calendar';
   return q.get('view') === 'board' || !q.get('list') ? 'board' : 'list';
 }
 
@@ -63,6 +65,12 @@ function WorkspaceInner({ user }) {
   const goingAway = useRef(null); // list I'm deleting or leaving on purpose, so it doesn't count as "access removed"
   const menuBtn = useRef(null);
   const closeBtn = useRef(null);
+  const mainRef = useRef(null);
+
+  // ---- the main view scrolls on its own: start each page / list at the top
+  useEffect(() => {
+    mainRef.current?.scrollTo(0, 0);
+  }, [view, activeId]);
   // Desktop sidebar collapsed to icons, remembered on this device (Workspace only renders in the browser, after sign-in)
   const [rail, setRail] = useState(() => {
     try { return localStorage.getItem('sidebar') === 'rail'; } catch { return false; }
@@ -154,7 +162,7 @@ function WorkspaceInner({ user }) {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (activeId) url.searchParams.set('list', activeId);
-    if (view === 'board') url.searchParams.set('view', 'board');
+    if (view === 'board' || view === 'calendar') url.searchParams.set('view', view);
     else url.searchParams.delete('view');
     window.history.replaceState(null, '', url);
     if (activeId) saveLastListId(user.uid, activeId).catch(() => {});
@@ -240,6 +248,10 @@ function WorkspaceInner({ user }) {
       ? [...arr].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || 0)
       : [...arr].sort((a, b) => favorites.has(b.id) - favorites.has(a.id));
   const arranged = arrange(lists || []);
+  // Tasks of every open list, live: the calendar shows them, the sidebar counts what's due
+  const openLists = arranged.filter((l) => !l.archived);
+  const allTasks = useAllTasks(openLists);
+  const dueNow = dueNowCount(taskEntries(openLists, allTasks));
   const mine = arranged.filter((l) => l.role === 'owner' && !l.archived);
   const others = arranged.filter((l) => l.role !== 'owner' && !l.archived);
   // From dragging on My List: the cards I moved, then everything else in its current place
@@ -302,6 +314,15 @@ function WorkspaceInner({ user }) {
                 <Icon name="grid" /><span className="lbl">My List</span>
                 <span className="count">{(lists || []).filter((l) => !l.archived).length}</span>
               </button>
+              <button type="button" className={view === 'calendar' ? 'nav-i on' : 'nav-i'} title="Calendar"
+                aria-current={view === 'calendar' ? 'page' : undefined}
+                onClick={() => { setView('calendar'); setMenuOpen(false); }}>
+                <Icon name="calendar" /><span className="lbl">Calendar</span>
+                {dueNow > 0 && (
+                  <span className="due-badge" title={`${dueNow} task${dueNow > 1 ? 's' : ''} due today or overdue`}
+                    aria-label={`${dueNow} due today or overdue`}>{dueNow}</span>
+                )}
+              </button>
             </nav>
 
             <ListGroup title="Owned by me" lists={mine} {...group}
@@ -333,9 +354,11 @@ function WorkspaceInner({ user }) {
         </div>
       </aside>
 
-      <main className="main">
+      <main className="main" ref={mainRef}>
         {lists === null ? (
           <div className="center muted">Loading your lists…</div>
+        ) : view === 'calendar' ? (
+          <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
         ) : view === 'board' ? (
           <Board lists={arranged} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)}
             onReorder={onReorder} />
@@ -404,6 +427,7 @@ function ListGroup({ title, lists, activeId, onPick, favorites, actions, empty }
 // Small line icons for the sidebar
 const ICONS = {
   plus: <path d="M12 5v14M5 12h14" />,
+  calendar: <><rect x="3" y="5" width="18" height="16" rx="2" /><path d="M3 10h18M8 3v4M16 3v4" /></>,
   grid: <><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><rect x="14" y="14" width="7" height="7" rx="1.5" /></>,
   archive: <><rect x="3" y="4" width="18" height="5" rx="1" /><path d="M5 9v10a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V9M10 13h4" /></>,
   chevron: <path d="m9 6 6 6-6 6" />,
