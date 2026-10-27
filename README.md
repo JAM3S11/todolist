@@ -276,3 +276,26 @@ Firebase Hosting works too, but Vercel is the simplest option for Next.js.
 | Reset email doesn't arrive | Check spam. Firebase's sender can be slow. |
 | Changes don't sync | You're offline. Changes are kept on this device and sync when you reconnect. |
 | Error about the offline cache / IndexedDB in a private window | Some browsers block it in private mode; the app falls back to online-only automatically. |
+
+
+
+
+
+TO-Dp
+The Marketplace's email option is Resend (resend/resend-email), so I'll build on that. Connecting it to your Vercel account needs your login and a browser step, which I can't do for you. Here's what to do; the ! at the start runs each command right here in this chat:
+
+1. Log in to Vercel: ! npx vercel login
+2. Link this folder to your Vercel project: ! npx vercel link. Pick the project behind sharedtodolist.vercel.app.
+3. Add Resend: ! npx vercel integration add resend/resend-email. If it opens a browser to accept terms or create the Resend account, finish that there. It adds the Resend key to your Vercel project automatically.
+4. Firebase admin key, so the daily job can read tasks on the server:
+   - In the Firebase console, go to ⚙️ Project settings → Service accounts → Generate new private key. That downloads a JSON file.
+   - In Vercel, go to your project → Settings → Environment Variables, add FIREBASE_SERVICE_ACCOUNT, and paste the whole JSON file's contents as the value.
+   - Please don't paste that key into this chat. It gives full access to your database.
+
+One thing to know about Resend: until you verify a domain you own with it, Resend only sends to the email address on your Resend account. That's enough for testing reminders on yourself. Reminding your other users needs your own domain (for example sharedtodo.app, which you could buy through Vercel) verified in Resend. You can't verify vercel.app because Vercel owns it. You can start testing without a domain and add one later.
+
+Tell me when steps 1–4 are done, or if any step gives an error. Then I'll build:
+- the Reminders setting in the account menu
+- the daily /api/reminders job with a Vercel Cron schedule (once a day in the morning, Kenya time)
+- the digest email itself
+- the switch of all app links to https://sharedtodolist.vercel.app

@@ -12,7 +12,9 @@ import {
 import { PERMISSIONS, canComment, canWrite, roleLabel } from '@/lib/permissions';
 import { Avatar } from '@/lib/people';
 import { useDraft } from '@/lib/useDraft';
+import { dueLabel } from '@/lib/dates';
 import { useToast } from './Toast';
+import DuePicker from './DuePicker';
 import TaskItem from './TaskItem';
 import Comments from './Comments';
 import ShareModal from './ShareModal';
@@ -30,6 +32,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(list.title);
   const [newTask, setNewTask] = useDraft(`draft:task:${list.id}`);
+  const [newDue, setNewDue] = useState(null);
 
   useEffect(() => setTitle(list.title), [list.title]);
 
@@ -68,9 +71,12 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     e.preventDefault();
     const text = newTask.trim();
     if (!text) return;
+    const due = newDue;
     setNewTask('');
-    addTask(list.id, user, text).catch((err) => {
+    setNewDue(null);
+    addTask(list.id, user, text, due).catch((err) => {
       setNewTask(text);
+      setNewDue(due);
       toast(`Not saved: ${friendlyError(err)}`, 'err');
     });
   }
@@ -95,6 +101,9 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     me: user.uid,
     onToggle: () => run(updateTask(list.id, t.id, user, { done: !t.done })),
     onEdit: (text) => run(updateTask(list.id, t.id, user, { text })),
+    // removing the date also removes its time
+    onDue: (due) => run(updateTask(list.id, t.id, user, due ? { due } : { due: null, start: null, mins: null }),
+      due ? `Due ${dueLabel(due).toLowerCase()}` : 'Due date removed'),
     onArchive: () => run(updateTask(list.id, t.id, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
     onDelete: () => run(deleteTask(list.id, t.id), 'Task deleted'),
   });
@@ -155,6 +164,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
           {write && (
             <form className="add" onSubmit={onAdd}>
               <input id="new-task" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task" autoComplete="off" maxLength={500} />
+              <DuePicker value={newDue} onChange={setNewDue} compact />
               <button className="btn primary" type="submit">Add</button>
             </form>
           )}
