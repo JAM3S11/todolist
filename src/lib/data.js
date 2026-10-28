@@ -262,6 +262,10 @@ export const addComment = (listId, user, text) =>
     createdAt: serverTimestamp(),
   });
 
+// Only the person who wrote it can change it; it's marked as edited
+export const editComment = (listId, id, text) =>
+  updateDoc(doc(commentsCol(listId), id), { text, editedAt: serverTimestamp() });
+
 export const deleteComment = (listId, id) => writeBatch(db()).delete(doc(commentsCol(listId), id)).commit();
 
 function escapeHtml(s) {

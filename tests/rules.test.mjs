@@ -209,6 +209,40 @@ describe('comments', () => {
     assertFails(addDoc(collection(as('commenter'), 'lists', LIST, 'comments'), { ...c('commenter'), userId: 'owner' })));
   test('cannot delete someone else\'s comment', () => assertFails(deleteDoc(doc(as('rw'), 'lists', LIST, 'comments', 'c1'))));
   test('owner can delete any comment', () => assertSucceeds(deleteDoc(doc(as('owner'), 'lists', LIST, 'comments', 'c1'))));
+
+  // c1 is the owner's; c2 the commenter's; c3 one the reader wrote back when they could comment
+  const seed = (id, who) => env.withSecurityRulesDisabled((ctx) =>
+    setDoc(doc(ctx.firestore(), 'lists', LIST, 'comments', id), { ...c(who), createdAt: new Date() }));
+  const edit = (who, id, extra = {}) =>
+    updateDoc(doc(as(who), 'lists', LIST, 'comments', id), { text: 'fixed', editedAt: serverTimestamp(), ...extra });
+  test('author can edit their comment', async () => {
+    await seed('c2', 'commenter');
+    await assertSucceeds(edit('commenter', 'c2'));
+  });
+  test('owner can edit their own comment', () => assertSucceeds(edit('owner', 'c1')));
+  test('cannot edit someone else\'s comment, not even the owner', async () => {
+    await seed('c2', 'commenter');
+    await assertFails(edit('owner', 'c2'));
+    await assertFails(edit('rw', 'c2'));
+  });
+  test('editing cannot change who wrote it or when', async () => {
+    await seed('c2', 'commenter');
+    await assertFails(edit('commenter', 'c2', { userId: 'owner' }));
+    await assertFails(edit('commenter', 'c2', { createdAt: new Date(0) }));
+  });
+  test('edited comment must be 1 to 2000 characters', async () => {
+    await seed('c2', 'commenter');
+    await assertFails(edit('commenter', 'c2', { text: '' }));
+    await assertFails(edit('commenter', 'c2', { text: 'x'.repeat(2001) }));
+  });
+  test('edit must be stamped with the time', async () => {
+    await seed('c2', 'commenter');
+    await assertFails(updateDoc(doc(as('commenter'), 'lists', LIST, 'comments', 'c2'), { text: 'fixed' }));
+  });
+  test('cannot edit after losing comment access', async () => {
+    await seed('c3', 'reader');
+    await assertFails(edit('reader', 'c3'));
+  });
 });
 
 describe('profiles and invitations', () => {
