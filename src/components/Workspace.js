@@ -4,6 +4,7 @@ import { signOut } from 'firebase/auth';
 import { fb, friendlyError } from '@/lib/firebase';
 import {
   archiveList,
+  createLetter,
   createList,
   deleteList,
   emailOf,
@@ -30,6 +31,8 @@ import ListDialog from './ListDialogs';
 import ListMenu from './ListMenu';
 import Notifications, { NotificationsPage, useNotifications } from './Notifications';
 import ListView from './ListView';
+import Letters from './Letters';
+import LetterView from './LetterView';
 import Loading from './Loading';
 import { ToastProvider, useToast } from './Toast';
 
@@ -44,7 +47,7 @@ export default function Workspace(props) {
 // Signing in lands on "My List" (the board), unless a shared link (?list=…) points at one list
 function initialView() {
   const q = new URLSearchParams(window.location.search);
-  if (q.get('view') === 'calendar' || q.get('view') === 'notifications') return q.get('view');
+  if (['calendar', 'notifications', 'letters'].includes(q.get('view'))) return q.get('view');
   return q.get('view') === 'board' || !q.get('list') ? 'board' : 'list';
 }
 
@@ -58,7 +61,7 @@ function WorkspaceInner({ user }) {
   const [activeId, setActiveId] = useState(null);
   const [view, setView] = useState(initialView);
   const [dialog, setDialog] = useState(null); // { kind: 'rename' | 'members' | 'delete' | 'leave', id }
-  const [creating, setCreating] = useState(false);
+  const [creating, setCreating] = useState(false); // false | 'list' | 'letter'
   const [showArchived, setShowArchived] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const restored = useRef(false);
@@ -142,7 +145,7 @@ function WorkspaceInner({ user }) {
       const fromUrl = new URLSearchParams(window.location.search).get('list');
       const last = await getLastListId(user.uid).catch(() => null);
       const pick =
-        lists.find((l) => l.id === fromUrl)?.id || lists.find((l) => l.id === last)?.id || lists[0]?.id || null;
+        lists.find((l) => l.id === fromUrl)?.id || lists.find((l) => l.id === last)?.id || lists.find((l) => l.kind !== 'letter')?.id || null;
       if (fromUrl && !lists.some((l) => l.id === fromUrl)) {
         toast("That list isn't shared with this account. Sign in with the email it was sent to.", 'err');
         setView('board');
@@ -167,32 +170,38 @@ function WorkspaceInner({ user }) {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (activeId) url.searchParams.set('list', activeId);
-    if (view === 'board' || view === 'calendar' || view === 'notifications') url.searchParams.set('view', view);
+    if (['board', 'calendar', 'notifications', 'letters'].includes(view)) url.searchParams.set('view', view);
     else url.searchParams.delete('view');
     window.history.replaceState(null, '', url);
     if (activeId) saveLastListId(user.uid, activeId).catch(() => {});
   }, [activeId, view, user.uid]);
 
-  // ---- if the open list disappears (deleted, or my access was removed), move on
+  // ---- if the open list disappears (deleted, or my access was removed), move on.
+  // A letter that disappears goes back to the Love letters page rather than into some to-do list.
+  const activeWasLetter = useRef(false);
   useEffect(() => {
     if (!lists || !activeId || !restored.current) return;
-    if (!lists.some((l) => l.id === activeId)) {
-      if (goingAway.current !== activeId) toast('You no longer have access to that list.');
-      setActiveId(lists[0]?.id ?? null);
-    }
-  }, [lists, activeId, toast]);
+    const now = lists.find((l) => l.id === activeId);
+    if (now) { activeWasLetter.current = now.kind === 'letter'; return; }
+    const letter = activeWasLetter.current;
+    if (goingAway.current !== activeId) toast(`You no longer have access to that ${letter ? 'letter' : 'list'}.`);
+    if (letter && view === 'list') setView('letters');
+    setActiveId(lists.find((l) => l.kind !== 'letter')?.id ?? null);
+  }, [lists, activeId, toast, view]);
 
   // Step off the list first, so its tasks and comments stop listening before it goes away
   async function stepAway(list, work, okMsg, failMsg) {
     goingAway.current = list.id;
     const wasActive = activeId === list.id;
-    if (wasActive) setActiveId(lists.find((l) => l.id !== list.id)?.id ?? null);
+    const wasView = view;
+    if (wasActive && list.kind === 'letter' && view === 'list') setView('letters');
+    if (wasActive) setActiveId(lists.find((l) => l.id !== list.id && l.kind !== 'letter')?.id ?? null);
     try {
       await work();
       toast(okMsg);
     } catch (err) {
       goingAway.current = null;
-      if (wasActive) setActiveId(list.id);
+      if (wasActive) { setActiveId(list.id); setView(wasView); }
       toast(`${failMsg}: ${friendlyError(err)}`, 'err');
     }
   }
@@ -221,9 +230,10 @@ function WorkspaceInner({ user }) {
   // From the "+" on My List: create, then go straight to the new list. Returns a problem to show, or nothing.
   async function onCreate(title) {
     try {
-      const id = await createList(user, title);
+      const letter = creating === 'letter';
+      const id = await (letter ? createLetter : createList)(user, title);
       pick(id);
-      toast(`“${title}” created. Add your first task.`);
+      toast(letter ? `“${title}” started. Write from the heart.` : `“${title}” created. Add your first task.`);
       return null;
     } catch (err) {
       return friendlyError(err);
@@ -243,7 +253,10 @@ function WorkspaceInner({ user }) {
     order.length
       ? [...arr].sort((a, b) => (rank.get(a.id) ?? Infinity) - (rank.get(b.id) ?? Infinity) || 0)
       : [...arr].sort((a, b) => favorites.has(b.id) - favorites.has(a.id));
-  const arranged = arrange(lists || []);
+  // Love letters live on their own page; every to-do view (My List, Calendar, the sidebar) leaves them out
+  const todoLists = useMemo(() => (lists || []).filter((l) => l.kind !== 'letter'), [lists]);
+  const letters = useMemo(() => (lists || []).filter((l) => l.kind === 'letter'), [lists]);
+  const arranged = arrange(todoLists);
   // Tasks of every open list, live: the calendar shows them, the sidebar counts what's due
   const openLists = arranged.filter((l) => !l.archived);
   // every list's tasks (archived too, so My List can search them); the calendar only uses the open lists'
@@ -259,7 +272,7 @@ function WorkspaceInner({ user }) {
     const moved = new Set(ids);
     report(saveListOrder(user.uid, [...ids, ...arranged.map((l) => l.id).filter((id) => !moved.has(id))]));
   };
-  const archived = (lists || []).filter((l) => l.archived);
+  const archived = todoLists.filter((l) => l.archived);
   const pick = (id) => { setActiveId(id); setView('list'); setMenuOpen(false); };
   const group = { activeId: view === 'list' ? activeId : null, onPick: pick, favorites, actions };
 
@@ -303,7 +316,7 @@ function WorkspaceInner({ user }) {
           {/* only this middle part scrolls, so the header and my account card always stay on screen */}
           <div className="side-scroll">
             <button type="button" className="new-list" title="New list"
-              onClick={() => { setView('board'); setCreating(true); setMenuOpen(false); }}>
+              onClick={() => { setView('board'); setCreating('list'); setMenuOpen(false); }}>
               <Icon name="plus" /><span className="lbl">New list</span>
             </button>
 
@@ -312,7 +325,7 @@ function WorkspaceInner({ user }) {
                 aria-current={view === 'board' ? 'page' : undefined}
                 onClick={() => { setView('board'); setMenuOpen(false); }}>
                 <Icon name="grid" /><span className="lbl">My List</span>
-                <span className="count">{(lists || []).filter((l) => !l.archived).length}</span>
+                <span className="count">{todoLists.filter((l) => !l.archived).length}</span>
               </button>
               <button type="button" className={view === 'calendar' ? 'nav-i on' : 'nav-i'} title="Calendar"
                 aria-current={view === 'calendar' ? 'page' : undefined}
@@ -322,6 +335,12 @@ function WorkspaceInner({ user }) {
                   <span className="due-badge" title={`${dueNow} task${dueNow > 1 ? 's' : ''} due today or overdue`}
                     aria-label={`${dueNow} due today or overdue`}>{dueNow}</span>
                 )}
+              </button>
+              <button type="button" className={view === 'letters' ? 'nav-i on' : 'nav-i'} title="Love letters"
+                aria-current={view === 'letters' ? 'page' : undefined}
+                onClick={() => { setView('letters'); setMenuOpen(false); }}>
+                <Icon name="heart" /><span className="lbl">Love letters</span>
+                {letters.length > 0 && <span className="count">{letters.filter((l) => !l.archived).length}</span>}
               </button>
               <button type="button" className={view === 'notifications' ? 'nav-i on' : 'nav-i'} title="Notifications"
                 aria-current={view === 'notifications' ? 'page' : undefined} onClick={showNotifications}>
@@ -366,9 +385,16 @@ function WorkspaceInner({ user }) {
           <NotificationsPage api={notif} onOpen={pick} />
         ) : view === 'calendar' ? (
           <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
+        ) : view === 'letters' ? (
+          <Letters letters={letters} contacts={contacts} favorites={favorites} actions={actions} onOpen={pick}
+            onNew={() => setCreating('letter')} />
         ) : view === 'board' ? (
-          <Board lists={arranged} tasksByList={allTasks} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating(true)}
+          <Board lists={arranged} tasksByList={allTasks} favorites={favorites} actions={actions} onOpen={pick} onNew={() => setCreating('list')}
             onReorder={onReorder} />
+        ) : active?.kind === 'letter' ? (
+          <LetterView key={active.id} list={active} role={active.role} user={user} contacts={contacts}
+            onLeave={actions.leave} onDelete={actions.remove} onArchive={actions.archive}
+            menu={<ListMenu list={active} favorite={favorites.has(active.id)} actions={actions} />} />
         ) : active ? (
           <ListView key={active.id} list={active} role={active.role} user={user} contacts={contacts}
             onLeave={actions.leave} onDelete={actions.remove} onArchive={actions.archive}
@@ -381,7 +407,7 @@ function WorkspaceInner({ user }) {
                 Create your first list from My List. When someone shares a list with {user.email}, it shows up under
                 “Shared with me”.
               </p>
-              <button className="btn primary" type="button" onClick={() => { setView('board'); setCreating(true); }}>
+              <button className="btn primary" type="button" onClick={() => { setView('board'); setCreating('list'); }}>
                 + New list
               </button>
             </div>
@@ -390,7 +416,8 @@ function WorkspaceInner({ user }) {
       </main>
 
       {creating && (
-        <ListDialog dialog={{ kind: 'create' }} contacts={contacts} onCreate={onCreate} onClose={() => setCreating(false)} />
+        <ListDialog dialog={{ kind: 'create', letter: creating === 'letter' }} contacts={contacts} onCreate={onCreate}
+          onClose={() => setCreating(false)} />
       )}
 
       {dialogList && (
@@ -441,6 +468,7 @@ const ICONS = {
   sidebar: <><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M9 4v16M15 10l-2 2 2 2" /></>,
   logout: <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" />,
   close: <path d="M18 6 6 18M6 6l12 12" />,
+  heart: <path d="M12 20s-7-4.4-9-8.8C1.6 8 3.6 4.5 7 4.5c2 0 3.4 1.1 5 2.8 1.6-1.7 3-2.8 5-2.8 3.4 0 5.4 3.5 4 6.7C19 15.6 12 20 12 20z" />,
   bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
 };
 

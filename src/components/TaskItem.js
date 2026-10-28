@@ -2,9 +2,11 @@
 import { useState } from 'react';
 import { timeAgo } from '@/lib/people';
 import DuePicker from './DuePicker';
+import { AddLink, LinkChips } from './TaskLinks';
 
-export default function TaskItem({ task, write, me, onToggle, onEdit, onDue, onArchive, onDelete }) {
+export default function TaskItem({ task, write, me, onToggle, onEdit, onDue, onArchive, onDelete, onAddLink, onRemoveLink }) {
   const [editing, setEditing] = useState(false);
+  const [linking, setLinking] = useState(false); // the "add a link" form under the task
   const [text, setText] = useState(task.text);
   const [confirm, setConfirm] = useState(false);
   const [more, setMore] = useState(false); // phones: the actions open under the task from the ⋯ button
@@ -39,10 +41,19 @@ export default function TaskItem({ task, write, me, onToggle, onEdit, onDue, onA
               if (e.key === 'Escape') { setText(task.text); setEditing(false); }
             }}
           />
+        ) : task.links?.length ? (
+          // links sit on the same line as the task, wrapping after it when there's no room
+          <span className="t-line">
+            <span>{task.text}</span>
+            <LinkChips links={task.links} canEdit={write && !task.archived} onRemove={onRemoveLink} />
+          </span>
         ) : (
           task.text
         )}
         {task.notes && !editing && <p className="task-notes">{task.notes}</p>}
+        {!editing && linking && write && !task.archived && (
+          <div className="task-links"><AddLink links={task.links} onAdd={onAddLink} setAdding={setLinking} /></div>
+        )}
       </div>
       <DuePicker value={task.due || null} task={task} canEdit={write && !task.archived} onChange={onDue} time={task.start || null} />
       <span className="by" title={`Updated ${timeAgo(task.updatedAt)}${edited}`}>{by}</span>
@@ -62,6 +73,7 @@ export default function TaskItem({ task, write, me, onToggle, onEdit, onDue, onA
           ) : (
             <>
               {!editing && <button className="ic" type="button" onClick={() => { setText(task.text); setEditing(true); setMore(false); }}>Edit</button>}
+              {!editing && !task.archived && <button className="ic" type="button" onClick={() => { setLinking(true); setMore(false); }}>Link</button>}
               <button className="ic" type="button" onClick={() => { setMore(false); onArchive(); }}>{task.archived ? 'Restore' : 'Archive'}</button>
               <button className="ic del" type="button" onClick={() => setConfirm(true)}>Delete</button>
             </>

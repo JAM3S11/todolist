@@ -176,6 +176,17 @@ describe('tasks', () => {
     assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'Call ahead first' }))));
   test('notes must be text of at most 2000 characters', () =>
     assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'x'.repeat(2001) }))));
+  test('can add links to a task', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { links: [{ url: 'https://example.com', title: 'Example' }] }))));
+  test('can add a link to an existing task', () =>
+    assertSucceeds(updateDoc(doc(as('rw'), 'lists', LIST, 'tasks', 't1'), { links: arrayUnion({ url: 'https://example.com', title: '' }), ...stamp('rw') })));
+  test('reader cannot add a link', () =>
+    assertFails(updateDoc(doc(as('reader'), 'lists', LIST, 'tasks', 't1'), { links: arrayUnion({ url: 'https://example.com', title: '' }), ...stamp('reader') })));
+  test('at most 10 links', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'),
+      task('writer', { links: Array.from({ length: 11 }, (_, i) => ({ url: `https://example.com/${i}`, title: '' })) }))));
+  test('links must be a list', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { links: 'https://example.com' }))));
   test('due date must be YYYY-MM-DD', () =>
     assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { due: 'next tuesday' }))));
 });
@@ -257,4 +268,65 @@ describe('profiles and invitations', () => {
     assertFails(addDoc(collection(as('rw'), 'mail'), {
       to: 'reader@test.com', listId: LIST, createdBy: 'rw', message: { subject: 's', html: 'h', text: 't' },
     })));
+});
+
+describe('love letters', () => {
+  const LETTER = 'letter1';
+  const letter = (extra = {}) => ({
+    title: 'For you', kind: 'letter', body: 'Dear you', ownerId: 'owner', ownerEmail: 'owner@test.com', ownerName: 'Owner',
+    roles: {}, memberEmails: [], leftEmails: [], createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  });
+  // one letter per recipient role, each shared with just that person
+  const shareTo = async (who) => env.withSecurityRulesDisabled((ctx) =>
+    setDoc(doc(ctx.firestore(), 'lists', LETTER), {
+      ...letter({ roles: { [people[who].email]: who === 'rw' ? 'readwrite' : who === 'writer' ? 'write' : who === 'commenter' ? 'comment' : 'read' },
+        memberEmails: [people[who].email] }),
+      createdAt: new Date(), updatedAt: new Date(),
+    }));
+
+  test('owner can write a letter', () => assertSucceeds(setDoc(doc(as('owner'), 'lists', 'new'), letter())));
+  test('a letter goes to one person only', async () => {
+    await shareTo('reader');
+    await assertFails(updateDoc(doc(as('owner'), 'lists', LETTER), new FieldPath('roles', 'writer@test.com'), 'write',
+      'memberEmails', arrayUnion('writer@test.com')));
+  });
+  test('owner can share a letter with one person', async () => {
+    await setDoc(doc(as('owner'), 'lists', 'new'), letter());
+    await assertSucceeds(updateDoc(doc(as('owner'), 'lists', 'new'), new FieldPath('roles', 'reader@test.com'), 'read',
+      'memberEmails', arrayUnion('reader@test.com')));
+  });
+  test('a letter cannot become a list', async () => {
+    await shareTo('reader');
+    await assertFails(updateDoc(doc(as('owner'), 'lists', LETTER), { kind: 'list' }));
+  });
+  test('a list cannot become a letter', () => assertFails(updateDoc(doc(as('owner'), 'lists', LIST), { kind: 'letter' })));
+  for (const who of ['writer', 'rw']) {
+    test(`${who} recipient can edit the letter`, async () => {
+      await shareTo(who);
+      await assertSucceeds(updateDoc(doc(as(who), 'lists', LETTER), { body: 'Dear you, always', updatedAt: serverTimestamp() }));
+    });
+  }
+  for (const who of ['reader', 'commenter']) {
+    test(`${who} recipient can read but not edit the letter`, async () => {
+      await shareTo(who);
+      await assertSucceeds(getDoc(doc(as(who), 'lists', LETTER)));
+      await assertFails(updateDoc(doc(as(who), 'lists', LETTER), { body: 'Changed', updatedAt: serverTimestamp() }));
+    });
+  }
+  test('nobody else can read the letter', async () => {
+    await shareTo('reader');
+    await assertFails(getDoc(doc(as('writer'), 'lists', LETTER)));
+    await assertFails(getDoc(doc(as('stranger'), 'lists', LETTER)));
+  });
+  test('writers on a to-do list cannot give it a body', () =>
+    assertFails(updateDoc(doc(as('writer'), 'lists', LIST), { body: 'hi', updatedAt: serverTimestamp() })));
+  test('the letter body has a size limit', async () => {
+    await shareTo('rw');
+    await assertFails(updateDoc(doc(as('rw'), 'lists', LETTER), { body: 'x'.repeat(20001), updatedAt: serverTimestamp() }));
+  });
+  test('comment recipient can comment on the letter', async () => {
+    await shareTo('commenter');
+    await assertSucceeds(addDoc(collection(as('commenter'), 'lists', LETTER, 'comments'),
+      { text: 'Aww', userId: 'commenter', userName: 'c', userEmail: 'commenter@test.com', createdAt: serverTimestamp() }));
+  });
 });

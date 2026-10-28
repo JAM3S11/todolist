@@ -9,9 +9,9 @@ import Select, { inDropdown } from './Select';
 import { useToast } from './Toast';
 
 // Opens the sharer's own email app with the invitation filled in
-const mailtoFor = (to, title, link) =>
+const mailtoFor = (to, title, link, what = 'the to-do list') =>
   `mailto:${to.join(',')}?subject=${encodeURIComponent(`I shared “${title}” with you`)}&body=${encodeURIComponent(
-    `I shared the to-do list “${title}” with you.\n\nOpen it here: ${link}\n\nSign in or create an account with this email address to see it.`,
+    `I shared ${what} “${title}” with you.\n\nOpen it here: ${link}\n\nSign in or create an account with this email address to see it.`,
   )}`;
 
 export default function ShareModal({ list, members, contacts, user, onClose }) {
@@ -30,6 +30,9 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
   const left = useMemo(() => [...(list.leftEmails || [])].sort(), [list.leftEmails]);
   const nameByEmail = useMemo(() => Object.fromEntries(contacts.map((c) => [c.email, c])), [contacts]);
   const listLink = appUrl(`/?list=${list.id}`);
+  // A love letter goes to one person: once someone has it, nobody else can be added
+  const single = list.kind === 'letter';
+  const full = single && members.length > 0;
 
   useEffect(() => {
     const onKey = (e) => e.key === 'Escape' && !inDropdown(e.target) && onClose();
@@ -40,6 +43,10 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
   const shown = contacts.filter((c) => `${c.displayName || ''} ${c.email}`.toLowerCase().includes(search.toLowerCase()));
 
   function togglePick(email) {
+    if (single) {
+      setEmails([]);
+      return setPicked((s) => (s.has(email) ? new Set() : new Set([email])));
+    }
     setPicked((s) => {
       const n = new Set(s);
       n.has(email) ? n.delete(email) : n.add(email);
@@ -56,6 +63,7 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
     if (v === myEmail) return fail("That's your own email.");
     if (memberEmails.has(v)) return fail('This person already has access. Change their access below.');
     if (emails.includes(v) || picked.has(v)) return fail('Already added.');
+    if (single && (full || picked.size + emails.length >= 1)) return fail('A love letter can only go to one person.');
     if (members.length + picked.size + emails.length >= 100) return fail('A list can be shared with up to 100 people.');
     if (contacts.some((c) => c.email === v)) togglePick(v);
     else setEmails((es) => [...es, v]);
@@ -85,7 +93,9 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
           .then(() => { note = ` · invitation email${to.length === 1 ? '' : 's'} sent`; })
           .catch(() => { note = ' · invitation emails failed, send them the link instead'; });
       }
-      toast(`Shared with ${to.length} ${to.length === 1 ? 'person' : 'people'} · ${PERMISSIONS[perm].label}${note}`);
+      toast(single
+        ? `Letter sent to ${to[0]} · ${PERMISSIONS[perm].label}${note}`
+        : `Shared with ${to.length} ${to.length === 1 ? 'person' : 'people'} · ${PERMISSIONS[perm].label}${note}`);
       if (!inviteEmailsEnabled) setJustShared(to);
       setPicked(new Set());
       setEmails([]);
@@ -148,8 +158,14 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
         </div>
 
         <div className="m-b">
+          {full && (
+            <div className="hint">
+              A love letter goes to one person. Remove {members[0].email} below to send it to someone else.
+            </div>
+          )}
+          {!full && (<>
           <div>
-            <span className="sec-l">From your contacts</span>
+            <span className="sec-l">{single ? 'Who is it for?' : 'From your contacts'}</span>
             <input id="contact-search" className="search" value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search contacts" />
             <div className="contacts">
               {shown.length === 0 && (
@@ -174,7 +190,7 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
           </div>
 
           <div>
-            <label className="sec-l" htmlFor="email-input">Or add email addresses</label>
+            <label className="sec-l" htmlFor="email-input">{single ? 'Or their email address' : 'Or add email addresses'}</label>
             <div className="email-row">
               <input
                 id="email-input"
@@ -214,10 +230,11 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
               ))}
             </div>
           </div>
+          </>)}
 
           {members.length > 0 && (
             <div>
-              <span className="sec-l">People with access</span>
+              <span className="sec-l">{single ? 'Who it’s for' : 'People with access'}</span>
               <div className="access">
                 {members.map((m) => {
                   const p = nameByEmail[m.email] || { email: m.email };
@@ -251,7 +268,7 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
                         {displayName(p)}
                         <span className="em">Left on their own · no access</span>
                       </span>
-                      <button className="btn" type="button" disabled={busy} onClick={() => addAgain(email)}
+                      <button className="btn" type="button" disabled={busy || full} onClick={() => addAgain(email)}
                         title={`Share again with ${PERMISSIONS[perm].label.toLowerCase()} access`}>
                         Add again
                       </button>
@@ -269,7 +286,7 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
               people you&apos;ve shared with, after they sign in with that email.
             </span>
             {justShared.length > 0 && (
-              <a className="btn" href={mailtoFor(justShared, list.title, listLink)}>
+              <a className="btn" href={mailtoFor(justShared, list.title, listLink, single ? 'a love letter' : undefined)}>
                 ✉ Email {justShared.length === 1 ? justShared[0] : `${justShared.length} people`} the link
               </a>
             )}
@@ -284,13 +301,15 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
           <span className="sum">
             {recipients.length
               ? `${recipients.length} ${recipients.length === 1 ? 'person' : 'people'} will get ${PERMISSIONS[perm].label.toLowerCase()} access`
-              : 'No one selected yet'}
+              : full ? '' : 'No one selected yet'}
           </span>
           <div className="row">
             <button className="btn" type="button" onClick={onClose}>Done</button>
-            <button className="btn primary" type="button" disabled={(!recipients.length && !pending) || busy} onClick={share}>
-              {busy ? 'Sharing…' : 'Share'}
-            </button>
+            {!full && (
+              <button className="btn primary" type="button" disabled={(!recipients.length && !pending) || busy} onClick={share}>
+                {busy ? (single ? 'Sending…' : 'Sharing…') : single ? 'Send letter' : 'Share'}
+              </button>
+            )}
           </div>
         </div>
       </div>
