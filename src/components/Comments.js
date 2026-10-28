@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
-import { addComment, deleteComment, editComment } from '@/lib/data';
+import { addComment, deleteComment, editComment, emailOf } from '@/lib/data';
 import { Avatar, timeAgo, toDate } from '@/lib/people';
 import { useDraft } from '@/lib/useDraft';
 import { useToast } from './Toast';
@@ -19,15 +19,30 @@ export default function Comments({ list, comments, user, isOwner, hint }) {
     if (el) el.scrollTop = el.scrollHeight;
   }, [comments.length]);
 
+  // Once the server has it, tell me who was notified (the same people notify() in lib/data.js writes to)
+  function whoHears() {
+    const me = emailOf(user);
+    const roles = list.roles || {};
+    const names = [
+      ...(list.ownerEmail && list.ownerEmail !== me ? [list.ownerName || list.ownerEmail.split('@')[0]] : []),
+      ...Object.keys(roles).filter((e) => e !== me && (roles[e] === 'comment' || roles[e] === 'readwrite')).map((e) => e.split('@')[0]),
+    ];
+    if (!names.length) return 'only you can see it';
+    if (names.length <= 2) return `${names.join(' and ')} notified`;
+    return `${names.length} people notified`;
+  }
+
   function send(e) {
     e?.preventDefault();
     const v = text.trim();
     if (!v) return;
     setText('');
-    addComment(list, user, v).catch((err) => {
-      setText(v);
-      toast(`Comment not sent: ${friendlyError(err)}`, 'err');
-    });
+    addComment(list, user, v)
+      .then(() => toast(`Comment sent · ${whoHears()}`))
+      .catch((err) => {
+        setText(v);
+        toast(`Comment not sent: ${friendlyError(err)}`, 'err');
+      });
   }
 
   function startEdit(c) {
@@ -40,15 +55,19 @@ export default function Comments({ list, comments, user, isOwner, hint }) {
     const v = draft.trim();
     setEditing(null);
     if (!v || v === c.text) return;
-    editComment(list, c.id, user, v).catch((err) => {
-      setEditing(c.id);
-      setDraft(v);
-      toast(`Comment not saved: ${friendlyError(err)}`, 'err');
-    });
+    editComment(list, c.id, user, v)
+      .then(() => toast(`Comment updated · ${whoHears()}`))
+      .catch((err) => {
+        setEditing(c.id);
+        setDraft(v);
+        toast(`Comment not saved: ${friendlyError(err)}`, 'err');
+      });
   }
 
   function remove(c) {
-    deleteComment(list, c, user).catch((err) => toast(friendlyError(err), 'err'));
+    deleteComment(list, c, user)
+      .then(() => toast('Comment deleted'))
+      .catch((err) => toast(friendlyError(err), 'err'));
   }
 
   return (
