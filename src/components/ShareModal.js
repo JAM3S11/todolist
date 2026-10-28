@@ -108,10 +108,10 @@ export default function ShareModal({ list, members, contacts, user, onClose }) {
   async function onAccessChange(m, value) {
     try {
       if (value === '__remove') {
-        await removeAccess(list.id, m.email);
+        await removeAccess(list, user, m.email);
         toast(`${m.email} no longer has access`);
       } else {
-        await changeAccess(list.id, m.email, value);
+        await changeAccess(list, user, m.email, value);
         toast(`${m.email} now has ${PERMISSIONS[value].label.toLowerCase()} access`);
       }
     } catch (err) {

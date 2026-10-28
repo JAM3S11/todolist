@@ -149,6 +149,12 @@ input:not([type=checkbox]):not([type=radio]), textarea, select { border: 1px sol
 .nt-kind.k-share { color: var(--accent); }
 .nt-kind.k-due { color: #f0b45b; }
 .nt-kind.k-overdue { color: var(--danger); }
+/* comments: written, edited, deleted */
+.nt-ic.k-comment .av { font-size: 13px !important; }
+.nt-ic.k-comment .nt-ic-mini { background: var(--p-comment); color: #1d1533; }
+.nt-kind.k-comment, .nt-kind.k-comment-edit { color: var(--p-comment); }
+.nt-kind.k-comment-delete { color: var(--muted); }
+.nt-gone { text-decoration: line-through; opacity: .75; }
 .nt-dot { opacity: .6; }
 .nt-acts { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); box-shadow: 0 4px 12px rgb(0 0 0 / .3); }
 .nt-act { display: grid; place-items: center; width: 28px; height: 28px; padding: 0; border: none; border-radius: 6px; background: transparent; color: var(--muted); cursor: pointer; }
@@ -1343,3 +1349,6 @@ textarea.letter-body:focus { outline: none; box-shadow: 0 0 0 2px rgb(90 42 10 /
   .letter-body { font-size: 17.5px; }
   textarea.letter-body { min-height: 260px; font-size: 17.5px; }
 }
+.nt-ic.k-update .av { font-size: 13px !important; }
+.nt-ic.k-update .nt-ic-mini { background: var(--p-write); color: #2a1a04; }
+.nt-kind[class*="k-task-"], .nt-kind[class*="k-list-"], .nt-kind[class*="k-member-"], .nt-kind[class*="k-access-"], .nt-kind.k-letter-edit { color: var(--p-write); }

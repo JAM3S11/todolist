@@ -10,6 +10,7 @@ import {
   emailOf,
   getLastListId,
   leaveList,
+  markActivitySeen,
   markInviteSeen,
   renameList,
   saveLastListId,
@@ -17,6 +18,7 @@ import {
   saveProfile,
   setFavorite,
   watchFavorites,
+  watchActivity,
   watchInvites,
   watchListOrder,
   watchOwnedLists,
@@ -57,6 +59,7 @@ function WorkspaceInner({ user }) {
   const [owned, setOwned] = useState(null); // null = loading
   const [shared, setShared] = useState(null); // null = loading
   const [invites, setInvites] = useState([]);
+  const [activity, setActivity] = useState([]); // "X commented on …"
   const [favList, setFavList] = useState([]);
   const [activeId, setActiveId] = useState(null);
   const [view, setView] = useState(initialView);
@@ -118,6 +121,9 @@ function WorkspaceInner({ user }) {
   // ---- live notifications: "X shared a list with you"
   useEffect(() => watchInvites(email, setInvites, () => setInvites([])), [email]);
 
+  // ---- live notifications: someone wrote, edited or deleted a comment on one of my lists or letters
+  useEffect(() => watchActivity(email, setActivity, () => setActivity([])), [email]);
+
   // ---- my favourite lists (stored on my profile, so they follow me to any device)
   useEffect(() => watchFavorites(user.uid, setFavList), [user.uid]);
   const favorites = useMemo(() => new Set(favList), [favList]);
@@ -166,6 +172,18 @@ function WorkspaceInner({ user }) {
     markInviteSeen(inv.id).catch(() => {});
   }, [invites, activeId, view]);
 
+  // ---- comment notifications for the list I have open: I'm already looking at it, so they count as read.
+  // Each one only once, so "Mark as unread" sticks.
+  const autoSeen = useRef(new Set());
+  useEffect(() => {
+    if (view !== 'list' || !activeId) return;
+    for (const a of activity) {
+      if (a.listId !== activeId || a.seen || autoSeen.current.has(a.id)) continue;
+      autoSeen.current.add(a.id);
+      markActivitySeen(a.id).catch(() => {});
+    }
+  }, [activity, activeId, view]);
+
   // ---- remember the open list and view in the address bar, and the list in the database
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -207,9 +225,9 @@ function WorkspaceInner({ user }) {
   }
 
   const onLeave = (list) =>
-    stepAway(list, () => leaveList(list.id, email), `You left “${list.title}”`, "Couldn't leave the list");
+    stepAway(list, () => leaveList(list, user), `You left “${list.title}”`, "Couldn't leave the list");
   const onDelete = (list) =>
-    stepAway(list, () => deleteList(list.id), `“${list.title}” deleted`, "Couldn't delete the list");
+    stepAway(list, () => deleteList(list, user), `“${list.title}” deleted`, "Couldn't delete the list");
 
   const report = (promise, okMsg) =>
     promise.then(() => okMsg && toast(okMsg)).catch((e) => toast(`Not saved: ${friendlyError(e)}`, 'err'));
@@ -222,7 +240,7 @@ function WorkspaceInner({ user }) {
       report(setFavorite(user.uid, l.id, on), on ? `“${l.title}” added to favourites` : 'Removed from favourites');
     },
     members: (l) => setDialog({ kind: 'members', id: l.id }),
-    archive: (l) => report(archiveList(l.id, !l.archived), l.archived ? `“${l.title}” is back in your lists` : `“${l.title}” archived`),
+    archive: (l) => report(archiveList(l, user, !l.archived), l.archived ? `“${l.title}” is back in your lists` : `“${l.title}” archived`),
     remove: (l) => setDialog({ kind: 'delete', id: l.id }),
     leave: (l) => setDialog({ kind: 'leave', id: l.id }),
   };
@@ -263,7 +281,7 @@ function WorkspaceInner({ user }) {
   const allTasks = useAllTasks(arranged);
   const dueNow = dueNowCount(taskEntries(openLists, allTasks));
   // Shares + due / overdue reminders, for the bell and the Notifications page
-  const notif = useNotifications({ invites, lists, tasksByList: allTasks, uid: user.uid });
+  const notif = useNotifications({ invites, activity, lists, tasksByList: allTasks, uid: user.uid, openListId: view === 'list' ? activeId : null });
   const showNotifications = () => { setView('notifications'); setMenuOpen(false); };
   const mine = arranged.filter((l) => l.role === 'owner' && !l.archived);
   const others = arranged.filter((l) => l.role !== 'owner' && !l.archived);
@@ -422,7 +440,7 @@ function WorkspaceInner({ user }) {
 
       {dialogList && (
         <ListDialog dialog={{ kind: dialog.kind, list: dialogList }} contacts={contacts}
-          onRename={(l, t) => report(renameList(l.id, t), 'Name saved')}
+          onRename={(l, t) => report(renameList(l, user, t), 'Name saved')}
           onDelete={onDelete} onLeave={onLeave} onClose={() => setDialog(null)} />
       )}
     </div>

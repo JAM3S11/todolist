@@ -53,7 +53,7 @@ export default function LetterView({ list, role, user, contacts, onLeave, onDele
     const t = title.trim();
     setRenaming(false);
     if (!t || t === list.title) return setTitle(list.title);
-    renameList(list.id, t).catch((err) => toast(`Not saved: ${friendlyError(err)}`, 'err'));
+    renameList(list, user, t).catch((err) => toast(`Not saved: ${friendlyError(err)}`, 'err'));
   }
 
   const owner = { email: list.ownerEmail, displayName: list.ownerName };
@@ -126,14 +126,14 @@ export default function LetterView({ list, role, user, contacts, onLeave, onDele
         <section className="lv-tasks letter-sheet">
           <BurntPaper seed={list.id} tilt={false} className="letter-paper">
             <h2 className="letter-title">{list.title}</h2>
-            <LetterBody key={list.id} list={list} canEdit={write && !list.archived} />
+            <LetterBody key={list.id} list={list} user={user} canEdit={write && !list.archived} />
             <p className="letter-sign">— {'Your Adam 🥰' || list.ownerName || list.ownerEmail}</p>
           </BurntPaper>
         </section>
 
         {comment && (
           <Comments
-            listId={list.id}
+            list={list}
             comments={comments}
             user={user}
             isOwner={isOwner}
@@ -168,8 +168,9 @@ function letterDesc(role) {
 
 // The words of the letter. Saved a moment after you stop typing (and when you click away).
 // While you're typing, the other person's changes don't overwrite yours.
-function LetterBody({ list, canEdit }) {
+function LetterBody({ list, user, canEdit }) {
   const toast = useToast();
+  const told = useRef(false);
   const [text, setText] = useState(list.body || '');
   const [status, setStatus] = useState(null); // null | 'saving' | 'saved' | 'error'
   const [savedAt, setSavedAt] = useState(null);
@@ -190,9 +191,12 @@ function LetterBody({ list, canEdit }) {
     typing.current = false;
     if (v === (list.body || '')) return;
     setStatus('saving');
-    saveLetterBody(list.id, v)
+    // the other person hears about it once per visit, not on every autosave
+    const tell = !told.current;
+    told.current = true;
+    saveLetterBody(list, user, v, tell)
       .then(() => { setStatus('saved'); setSavedAt(new Date()); })
-      .catch((err) => { setStatus('error'); toast(`Not saved: ${friendlyError(err)}`, 'err'); });
+      .catch((err) => { if (tell) told.current = false; setStatus('error'); toast(`Not saved: ${friendlyError(err)}`, 'err'); });
   }
   const saveRef = useRef(save);
   saveRef.current = save;

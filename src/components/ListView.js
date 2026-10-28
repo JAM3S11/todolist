@@ -78,7 +78,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     const due = newDue;
     setNewTask('');
     setNewDue(null);
-    addTask(list.id, user, text, due).catch((err) => {
+    addTask(list, user, text, due).catch((err) => {
       setNewTask(text);
       setNewDue(due);
       toast(`Not saved: ${friendlyError(err)}`, 'err');
@@ -90,7 +90,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     const t = title.trim();
     setRenaming(false);
     if (!t || t === list.title) return setTitle(list.title);
-    run(renameList(list.id, t));
+    run(renameList(list, user, t));
   }
 
   const ownerPerson = { email: list.ownerEmail, displayName: list.ownerName };
@@ -103,15 +103,15 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     task: t,
     write,
     me: user.uid,
-    onToggle: () => run(updateTask(list.id, t.id, user, { done: !t.done })),
-    onEdit: (text) => run(updateTask(list.id, t.id, user, { text })),
+    onToggle: () => run(updateTask(list, t, user, { done: !t.done })),
+    onEdit: (text) => run(updateTask(list, t, user, { text })),
     // removing the date also removes its time
-    onDue: (due) => run(updateTask(list.id, t.id, user, due ? { due } : { due: null, start: null, mins: null }),
+    onDue: (due) => run(updateTask(list, t, user, due ? { due } : { due: null, start: null, mins: null }),
       due ? `Due ${dueLabel(due).toLowerCase()}` : 'Due date removed'),
-    onArchive: () => run(updateTask(list.id, t.id, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
-    onDelete: () => run(deleteTask(list.id, t.id), 'Task deleted'),
-    onAddLink: (link) => run(addTaskLink(list.id, t.id, user, link), 'Link added'),
-    onRemoveLink: (link) => run(removeTaskLink(list.id, t.id, user, link), 'Link removed'),
+    onArchive: () => run(updateTask(list, t, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
+    onDelete: () => run(deleteTask(list, t, user), 'Task deleted'),
+    onAddLink: (link) => run(addTaskLink(list, t, user, link), 'Link added'),
+    onRemoveLink: (link) => run(removeTaskLink(list, t, user, link), 'Link removed'),
   });
 
   return (
@@ -215,7 +215,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
 
         {comment && (
           <Comments
-            listId={list.id}
+            list={list}
             comments={comments}
             user={user}
             isOwner={isOwner}

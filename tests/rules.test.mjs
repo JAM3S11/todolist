@@ -364,3 +364,83 @@ describe('love letters', () => {
       { text: 'Aww', userId: 'commenter', userName: 'c', userEmail: 'commenter@test.com', createdAt: serverTimestamp() }));
   });
 });
+
+describe('comment notifications', () => {
+  const note = (from, to, extra = {}) => ({
+    to: people[to].email, listId: LIST, listTitle: 'Moving house', kind: 'comment', text: 'hi',
+    fromName: from, fromEmail: people[from].email, seen: false, createdAt: serverTimestamp(), ...extra,
+  });
+  const send = (from, to, extra) => addDoc(collection(as(from), 'activity'), note(from, to, extra));
+
+  test('commenter can notify the owner and others who see comments', async () => {
+    await assertSucceeds(send('commenter', 'owner'));
+    await assertSucceeds(send('commenter', 'rw'));
+    await assertSucceeds(send('owner', 'commenter', { kind: 'comment-delete' }));
+  });
+  test('cannot notify people who cannot see the comments', async () => {
+    await assertFails(send('commenter', 'reader'));
+    await assertFails(send('commenter', 'writer'));
+    await assertFails(send('commenter', 'stranger'));
+  });
+  test('people who cannot comment cannot send them', () => assertFails(send('writer', 'owner')));
+  test('cannot pretend to be someone else', () =>
+    assertFails(addDoc(collection(as('commenter'), 'activity'), { ...note('commenter', 'owner'), fromEmail: 'rw@test.com' })));
+  test('cannot notify yourself', () => assertFails(send('commenter', 'commenter')));
+  test('unknown kinds are refused', () => assertFails(send('commenter', 'owner', { kind: 'share' })));
+  test('only the person it is for can read, mark or remove it', async () => {
+    await env.withSecurityRulesDisabled(async (ctx) => {
+      await setDoc(doc(ctx.firestore(), 'activity', 'a1'), { ...note('commenter', 'owner'), createdAt: new Date() });
+    });
+    await assertSucceeds(getDoc(doc(as('owner'), 'activity', 'a1')));
+    await assertFails(getDoc(doc(as('rw'), 'activity', 'a1')));
+    await assertFails(updateDoc(doc(as('rw'), 'activity', 'a1'), { seen: true }));
+    await assertFails(updateDoc(doc(as('owner'), 'activity', 'a1'), { text: 'changed' }));
+    await assertSucceeds(updateDoc(doc(as('owner'), 'activity', 'a1'), { seen: true }));
+    await assertFails(deleteDoc(doc(as('commenter'), 'activity', 'a1')));
+    await assertSucceeds(deleteDoc(doc(as('owner'), 'activity', 'a1')));
+  });
+  test('"my notifications" query works', () =>
+    assertSucceeds(getDocs(query(collection(as('owner'), 'activity'), where('to', '==', 'owner@test.com')))));
+});
+
+describe('activity notifications', () => {
+  const note = (from, to, kind, extra = {}) => ({
+    to: people[to].email, listId: LIST, listTitle: 'Moving house', kind, text: 'Pack boxes', detail: '',
+    fromName: from, fromEmail: people[from].email, seen: false, createdAt: serverTimestamp(), ...extra,
+  });
+  const send = (from, to, kind, extra) => addDoc(collection(as(from), 'activity'), note(from, to, kind, extra));
+
+  test('writers tell everyone on the list about task changes, read-only people too', async () => {
+    await assertSucceeds(send('writer', 'reader', 'task-done'));
+    await assertSucceeds(send('rw', 'owner', 'task-add', { detail: '2026-11-02' }));
+    await assertSucceeds(send('owner', 'commenter', 'task-delete'));
+  });
+  test('people who cannot write cannot send task notifications', async () => {
+    await assertFails(send('reader', 'owner', 'task-done'));
+    await assertFails(send('commenter', 'owner', 'task-edit'));
+  });
+  test('task notifications only go to people on the list', () => assertFails(send('writer', 'stranger', 'task-add')));
+  test('only the owner sends list notifications', async () => {
+    await assertSucceeds(send('owner', 'reader', 'list-rename', { detail: 'Old name' }));
+    await assertSucceeds(send('owner', 'writer', 'access-changed', { detail: 'read' }));
+    await assertFails(send('rw', 'reader', 'list-rename'));
+    await assertFails(send('writer', 'owner', 'list-delete'));
+  });
+  test('a member tells the others they left; the owner cannot "leave"', async () => {
+    await assertSucceeds(send('reader', 'owner', 'member-left'));
+    await assertFails(send('owner', 'reader', 'member-left'));
+  });
+  test('notification fields are checked', async () => {
+    await assertFails(send('writer', 'owner', 'task-add', { detail: 'x'.repeat(201) }));
+    await assertFails(send('writer', 'owner', 'task-add', { extra: true }));
+    await assertFails(send('writer', 'owner', 'task-add', { letter: 'yes' }));
+  });
+  test('leaving tells the owner in the same batch', async () => {
+    const db = as('reader');
+    const b = writeBatch(db);
+    b.update(doc(db, 'lists', LIST), new FieldPath('roles', 'reader@test.com'), deleteField(),
+      'memberEmails', arrayRemove('reader@test.com'), 'leftEmails', arrayUnion('reader@test.com'));
+    b.set(doc(collection(db, 'activity')), note('reader', 'owner', 'member-left'));
+    await assertSucceeds(b.commit());
+  });
+});

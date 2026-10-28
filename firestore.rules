@@ -20,6 +20,7 @@ rules_version = '2';
 //    lists/{listId}/tasks/{taskId}
 //    lists/{listId}/comments/{commentId}
 //    invites/{listId_email}              in-app "shared with you" notification for one person
+//    activity/{id}                       in-app "X did something on a list you share" notification for one person
 //    mail/{id}                           optional invitation emails (Trigger Email extension)
 // =====================================================================
 
@@ -277,6 +278,52 @@ service cloud.firestore {
         || resource.data.to == myEmail()
         || listData(resource.data.listId).ownerId == request.auth.uid
       );
+    }
+
+    // ---------- in-app notifications: "X did something on a list you share" ----------
+    // Written in the same batch as the change itself, for someone else on the list.
+    // get() sees the list as it was before the batch, so leaving, removing and deleting can still notify.
+    //   comments            sent by someone who can comment, to people who can see the comments
+    //   tasks and letters   sent by someone who can write, to anyone on the list
+    //   the list itself     sent by the owner, to anyone on the list
+    //   member-left         sent by the member who leaves, to anyone on the list
+    match /activity/{activityId} {
+      function mayActivity(kind, role) {
+        return (kind in ['comment', 'comment-edit', 'comment-delete'] && canComment(role))
+          || (kind in ['task-add', 'task-edit', 'task-done', 'task-undone', 'task-due', 'task-notes', 'task-archive',
+                       'task-restore', 'task-delete', 'task-link', 'task-unlink', 'letter-edit'] && canWrite(role))
+          || (kind in ['list-rename', 'list-archive', 'list-unarchive', 'list-delete',
+                       'member-added', 'member-removed', 'access-changed', 'access-removed'] && role == 'owner')
+          || (kind == 'member-left' && role != null && role != 'owner');
+      }
+      function mayReceive(kind, list, to) {
+        return to == list.ownerEmail
+          || (kind in ['comment', 'comment-edit', 'comment-delete']
+            ? list.roles.get(to, '') in ['comment', 'readwrite']
+            : to in list.memberEmails);
+      }
+      function validActivity(d) {
+        return d.keys().hasOnly(['to', 'listId', 'listTitle', 'letter', 'kind', 'text', 'detail', 'fromName', 'fromEmail', 'seen', 'createdAt'])
+          && d.to is string && d.to != myEmail()
+          && d.listId is string
+          && d.listTitle is string && d.listTitle.size() <= 120
+          && d.get('letter', false) is bool
+          && d.kind is string
+          && d.get('text', '') is string && d.get('text', '').size() <= 200
+          && d.get('detail', '') is string && d.get('detail', '').size() <= 200
+          && d.fromName is string && d.fromName.size() <= 120
+          && d.fromEmail == myEmail() && d.seen == false && d.createdAt == request.time
+          && mayActivity(d.kind, roleIn(listData(d.listId)))
+          && mayReceive(d.kind, listData(d.listId), d.to);
+      }
+
+      allow read: if hasEmail() && resource.data.to == myEmail();
+      allow create: if hasEmail() && validActivity(request.resource.data);
+      // the person it's for marks it as read (or unread again), or removes it
+      allow update: if hasEmail() && resource.data.to == myEmail()
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen'])
+        && request.resource.data.seen is bool;
+      allow delete: if hasEmail() && resource.data.to == myEmail();
     }
 
     // ---------- optional: invitation emails ----------
