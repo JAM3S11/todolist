@@ -1,8 +1,8 @@
 'use client';
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
-import { addComment, deleteComment } from '@/lib/data';
-import { Avatar, timeAgo } from '@/lib/people';
+import { addComment, deleteComment, editComment } from '@/lib/data';
+import { Avatar, timeAgo, toDate } from '@/lib/people';
 import { useDraft } from '@/lib/useDraft';
 import { useToast } from './Toast';
 
@@ -10,6 +10,8 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
   const toast = useToast();
   const [text, setText] = useDraft(`draft:comment:${listId}`);
   const threadRef = useRef(null);
+  const [editing, setEditing] = useState(null); // the id of my comment being edited (one at a time)
+  const [draft, setDraft] = useState('');
 
   useEffect(() => {
     const el = threadRef.current;
@@ -24,6 +26,23 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
     addComment(listId, user, v).catch((err) => {
       setText(v);
       toast(`Comment not sent: ${friendlyError(err)}`, 'err');
+    });
+  }
+
+  function startEdit(c) {
+    setEditing(c.id);
+    setDraft(c.text);
+  }
+
+  // Unchanged or emptied: just close (Delete is how a comment goes away). If it's refused, reopen with my words.
+  function saveEdit(c) {
+    const v = draft.trim();
+    setEditing(null);
+    if (!v || v === c.text) return;
+    editComment(listId, c.id, v).catch((err) => {
+      setEditing(c.id);
+      setDraft(v);
+      toast(`Comment not saved: ${friendlyError(err)}`, 'err');
     });
   }
 
@@ -49,11 +68,38 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
                 <div className="nm">
                   {mine ? 'You' : c.userName || c.userEmail}
                   <span className="tm">{timeAgo(c.createdAt)}</span>
+                  {c.editedAt && (
+                    <span className="tm c-edited" title={`Edited ${toDate(c.editedAt).toLocaleString()}`}>· edited</span>
+                  )}
+                  {mine && editing !== c.id && (
+                    <button className="ic tiny" type="button" onClick={() => startEdit(c)} aria-label="Edit comment">Edit</button>
+                  )}
                   {(mine || isOwner) && (
                     <button className="ic tiny" type="button" onClick={() => remove(c)} aria-label="Delete comment">Delete</button>
                   )}
                 </div>
-                <div className="tx">{c.text}</div>
+                {editing === c.id ? (
+                  <div className="c-edit">
+                    <textarea
+                      autoFocus
+                      value={draft}
+                      maxLength={2000}
+                      aria-label="Edit your comment"
+                      onFocus={(e) => e.target.setSelectionRange(e.target.value.length, e.target.value.length)}
+                      onChange={(e) => setDraft(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); saveEdit(c); }
+                        if (e.key === 'Escape') { e.stopPropagation(); setEditing(null); } // close just the editor, not the panel it's in
+                      }}
+                    />
+                    <div className="c-edit-b">
+                      <button className="btn primary" type="button" onClick={() => saveEdit(c)}>Save</button>
+                      <button className="btn" type="button" onClick={() => setEditing(null)}>Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="tx">{c.text}</div>
+                )}
               </div>
             </div>
           );
