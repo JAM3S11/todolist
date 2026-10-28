@@ -104,16 +104,34 @@ export async function createList(user, title, kind = 'list') {
 
 export const createLetter = (user, title) => createList(user, title, 'letter');
 
-// The owner, and Write / Read & write recipients, can change what the letter says
-export const saveLetterBody = (id, body) => updateDoc(listRef(id), { body, updatedAt: serverTimestamp() });
+// The owner, and Write / Read & write recipients, can change what the letter says.
+// tell: let the other person know (the letter view does this once per visit, not on every autosave)
+export function saveLetterBody(list, user, body, tell = false) {
+  const b = writeBatch(db());
+  b.update(listRef(list.id), { body, updatedAt: serverTimestamp() });
+  if (tell) notify(b, list, user, 'letter-edit');
+  return b.commit();
+}
 
-export const renameList = (id, title) => updateDoc(listRef(id), { title, updatedAt: serverTimestamp() });
+export function renameList(list, user, title) {
+  const b = writeBatch(db());
+  b.update(listRef(list.id), { title, updatedAt: serverTimestamp() });
+  notify(b, { ...list, title }, user, 'list-rename', { detail: list.title });
+  return b.commit();
+}
 
 // Archived lists move to their own section for everyone; nothing is deleted
-export const archiveList = (id, archived) => updateDoc(listRef(id), { archived });
+export function archiveList(list, user, archived) {
+  const b = writeBatch(db());
+  b.update(listRef(list.id), { archived });
+  notify(b, list, user, archived ? 'list-archive' : 'list-unarchive');
+  return b.commit();
+}
 
-// Firestore doesn't delete sub-collections automatically, so remove tasks and comments first
-export async function deleteList(id) {
+// Firestore doesn't delete sub-collections automatically, so remove tasks and comments first.
+// Everyone on it is told in the same batch that removes the list itself.
+export async function deleteList(list, user) {
+  const id = list.id;
   const [tasks, comments] = await Promise.all([getDocs(tasksCol(id)), getDocs(commentsCol(id))]);
   const refs = [...tasks.docs, ...comments.docs].map((d) => d.ref);
   for (let i = 0; i < refs.length; i += 450) {
@@ -121,7 +139,10 @@ export async function deleteList(id) {
     refs.slice(i, i + 450).forEach((r) => b.delete(r));
     await b.commit();
   }
-  await writeBatch(db()).delete(listRef(id)).commit();
+  const b = writeBatch(db());
+  b.delete(listRef(id));
+  notify(b, list, user, 'list-delete');
+  await b.commit();
 }
 
 // ---------- sharing ----------
@@ -136,6 +157,8 @@ export function shareList(list, emails, permission, inviter) {
   // sharing again with someone who left takes them off the "left the list" section
   args.push('memberEmails', arrayUnion(...emails), 'leftEmails', arrayRemove(...emails), 'updatedAt', serverTimestamp());
   b.update(listRef(list.id), ...args);
+  // the people already on it hear who joined (the new people get their own "shared with you")
+  notify(b, list, inviter, 'member-added', { detail: emails.join(', '), skip: emails });
   emails.forEach((to) =>
     b.set(inviteRef(list.id, to), {
       to,
@@ -151,21 +174,31 @@ export function shareList(list, emails, permission, inviter) {
   return b.commit();
 }
 
-export const changeAccess = (id, email, permission) => updateDoc(listRef(id), roleField(email), permission);
-
-// The owner removing someone. Clears their notification too.
-export function removeAccess(id, email) {
+// The owner changing someone's access: they're told
+export function changeAccess(list, user, email, permission) {
   const b = writeBatch(db());
-  b.update(listRef(id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email));
-  b.delete(inviteRef(id, email));
+  b.update(listRef(list.id), roleField(email), permission);
+  notify(b, list, user, 'access-changed', { detail: permission, only: [email] });
+  return b.commit();
+}
+
+// The owner removing someone. Clears their "shared with you"; they're told, and so is everyone else.
+export function removeAccess(list, user, email) {
+  const b = writeBatch(db());
+  b.update(listRef(list.id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email));
+  b.delete(inviteRef(list.id, email));
+  notify(b, list, user, 'access-removed', { only: [email] });
+  notify(b, list, user, 'member-removed', { detail: email, skip: [email] });
   return b.commit();
 }
 
 // A member removing themselves. The owner sees they left until sharing with them again.
-export function leaveList(id, email) {
+export function leaveList(list, user) {
+  const email = emailOf(user);
   const b = writeBatch(db());
-  b.update(listRef(id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email), 'leftEmails', arrayUnion(email));
-  b.delete(inviteRef(id, email));
+  b.update(listRef(list.id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email), 'leftEmails', arrayUnion(email));
+  b.delete(inviteRef(list.id, email));
+  notify(b, list, user, 'member-left');
   return b.commit();
 }
 
@@ -212,7 +245,9 @@ const stamp = (user) => ({ updatedAt: serverTimestamp(), updatedBy: user.uid, up
 
 // due: optional 'YYYY-MM-DD' (see lib/dates.js); notes: optional details of what's going to be done;
 // time: optional { start: 'HH:MM', mins } on that day (no time = all day)
-export function addTask(listId, user, text, due = null, notes = '', time = null) {
+// list: the list it goes in (just { id } for a list nobody else is on yet)
+export function addTask(list, user, text, due = null, notes = '', time = null) {
+  const listId = list.id;
   const b = writeBatch(db());
   b.set(doc(tasksCol(listId)), {
     text,
@@ -227,24 +262,46 @@ export function addTask(listId, user, text, due = null, notes = '', time = null)
     ...stamp(user),
   });
   b.update(listRef(listId), { updatedAt: serverTimestamp() });
+  notify(b, list, user, 'task-add', { text, detail: due || '' });
   return b.commit();
 }
 
-export function updateTask(listId, taskId, user, patch) {
+// What a change to a task was, for the notification
+function taskKind(task, patch) {
+  if ('done' in patch) return patch.done ? 'task-done' : 'task-undone';
+  if ('archived' in patch) return patch.archived ? 'task-archive' : 'task-restore';
+  if ('text' in patch) return 'task-edit';
+  if ('due' in patch || 'start' in patch) return 'task-due';
+  if ('notes' in patch) return 'task-notes';
+  return null;
+}
+
+// task: the task as it is now (its text goes in the notification). kind: say what this was, if the patch doesn't.
+export function updateTask(list, task, user, patch, kind = taskKind(task, patch), detail = '') {
   const b = writeBatch(db());
-  b.update(doc(tasksCol(listId), taskId), { ...patch, ...stamp(user) });
-  b.update(listRef(listId), { updatedAt: serverTimestamp() });
+  b.update(doc(tasksCol(list.id), task.id), { ...patch, ...stamp(user) });
+  b.update(listRef(list.id), { updatedAt: serverTimestamp() });
+  const due = 'due' in patch ? patch.due || '' : '';
+  if (kind) {
+    notify(b, list, user, kind, {
+      text: patch.text || task.text,
+      detail: detail || (kind === 'task-edit' ? task.text : kind === 'task-due' ? (due && patch.start ? `${due} ${patch.start}` : due) : ''),
+    });
+  }
   return b.commit();
 }
 
 // links: { url, title } (see lib/links.js). Union/remove, so two people adding at once don't overwrite each other
-export const addTaskLink = (listId, taskId, user, link) => updateTask(listId, taskId, user, { links: arrayUnion(link) });
-export const removeTaskLink = (listId, taskId, user, link) => updateTask(listId, taskId, user, { links: arrayRemove(link) });
+export const addTaskLink = (list, task, user, link) =>
+  updateTask(list, task, user, { links: arrayUnion(link) }, 'task-link', link.title || link.url);
+export const removeTaskLink = (list, task, user, link) =>
+  updateTask(list, task, user, { links: arrayRemove(link) }, 'task-unlink', link.title || link.url);
 
-export function deleteTask(listId, taskId) {
+export function deleteTask(list, task, user) {
   const b = writeBatch(db());
-  b.delete(doc(tasksCol(listId), taskId));
-  b.update(listRef(listId), { updatedAt: serverTimestamp() });
+  b.delete(doc(tasksCol(list.id), task.id));
+  b.update(listRef(list.id), { updatedAt: serverTimestamp() });
+  notify(b, list, user, 'task-delete', { text: task.text });
   return b.commit();
 }
 
@@ -253,20 +310,78 @@ export function watchComments(listId, onData, onError) {
   return onSnapshot(query(commentsCol(listId), orderBy('createdAt', 'asc')), (s) => onData(withId(s)), onError);
 }
 
-export const addComment = (listId, user, text) =>
-  addDoc(commentsCol(listId), {
+// Each comment change also leaves a notification for everyone else on the list who can see the comments,
+// in the same batch, so the two always go together
+export function addComment(list, user, text) {
+  const b = writeBatch(db());
+  b.set(doc(commentsCol(list.id)), {
     text,
     userId: user.uid,
     userName: nameOf(user),
     userEmail: emailOf(user),
     createdAt: serverTimestamp(),
   });
+  notify(b, list, user, 'comment', { text });
+  return b.commit();
+}
 
 // Only the person who wrote it can change it; it's marked as edited
-export const editComment = (listId, id, text) =>
-  updateDoc(doc(commentsCol(listId), id), { text, editedAt: serverTimestamp() });
+export function editComment(list, id, user, text) {
+  const b = writeBatch(db());
+  b.update(doc(commentsCol(list.id), id), { text, editedAt: serverTimestamp() });
+  notify(b, list, user, 'comment-edit', { text });
+  return b.commit();
+}
 
-export const deleteComment = (listId, id) => writeBatch(db()).delete(doc(commentsCol(listId), id)).commit();
+export function deleteComment(list, comment, user) {
+  const b = writeBatch(db());
+  b.delete(doc(commentsCol(list.id), comment.id));
+  notify(b, list, user, 'comment-delete', { text: comment.text });
+  return b.commit();
+}
+
+// ---------- activity: "X did something on a list you share" notifications ----------
+// activity/{id}: one per person per event, written in the same batch as the change itself.
+// Only the person it's for can read, mark or remove it. Kinds (firestore.rules checks who may send which):
+//   comments           comment, comment-edit, comment-delete          (to people who can see the comments)
+//   tasks and letters  task-add, task-edit, task-done, task-undone, task-due, task-notes, task-archive,
+//                      task-restore, task-delete, task-link, task-unlink, letter-edit
+//   the list itself    list-rename, list-archive, list-unarchive, list-delete,
+//                      member-added, member-removed, access-changed, access-removed   (owner only)
+//   leaving            member-left
+const canSeeComments = (permission) => permission === 'comment' || permission === 'readwrite';
+
+// text: what it's about (a task, a comment); detail: the extra bit (old name, a date, someone's email)
+// only: just these people; skip: everyone except these
+function notify(batch, list, user, kind, { text = '', detail = '', only = null, skip = [] } = {}) {
+  const me = emailOf(user);
+  const roles = list.roles || {};
+  const members = kind.startsWith('comment') ? Object.keys(roles).filter((e) => canSeeComments(roles[e])) : Object.keys(roles);
+  const to = (only || [list.ownerEmail, ...members]).filter((e) => e && e !== me && !skip.includes(e));
+  for (const email of new Set(to)) {
+    batch.set(doc(collection(db(), 'activity')), {
+      to: email,
+      listId: list.id,
+      listTitle: (list.title || '').slice(0, 120),
+      ...(list.kind === 'letter' ? { letter: true } : {}),
+      kind,
+      text: String(text).slice(0, 200),
+      detail: String(detail).slice(0, 200),
+      fromName: nameOf(user).slice(0, 120),
+      fromEmail: me,
+      seen: false,
+      createdAt: serverTimestamp(),
+    });
+  }
+}
+
+export function watchActivity(email, onData, onError) {
+  return onSnapshot(query(collection(db(), 'activity'), where('to', '==', email)), (s) => onData(withId(s)), onError);
+}
+
+export const markActivitySeen = (id, seen = true) => updateDoc(doc(db(), 'activity', id), { seen });
+
+export const dismissActivity = (id) => writeBatch(db()).delete(doc(db(), 'activity', id)).commit();
 
 function escapeHtml(s) {
   return String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);

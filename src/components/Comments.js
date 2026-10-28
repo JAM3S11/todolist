@@ -6,7 +6,8 @@ import { Avatar, timeAgo, toDate } from '@/lib/people';
 import { useDraft } from '@/lib/useDraft';
 import { useToast } from './Toast';
 
-export default function Comments({ listId, comments, user, isOwner, hint }) {
+export default function Comments({ list, comments, user, isOwner, hint }) {
+  const listId = list.id;
   const toast = useToast();
   const [text, setText] = useDraft(`draft:comment:${listId}`);
   const threadRef = useRef(null);
@@ -23,7 +24,7 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
     const v = text.trim();
     if (!v) return;
     setText('');
-    addComment(listId, user, v).catch((err) => {
+    addComment(list, user, v).catch((err) => {
       setText(v);
       toast(`Comment not sent: ${friendlyError(err)}`, 'err');
     });
@@ -39,7 +40,7 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
     const v = draft.trim();
     setEditing(null);
     if (!v || v === c.text) return;
-    editComment(listId, c.id, v).catch((err) => {
+    editComment(list, c.id, user, v).catch((err) => {
       setEditing(c.id);
       setDraft(v);
       toast(`Comment not saved: ${friendlyError(err)}`, 'err');
@@ -47,7 +48,7 @@ export default function Comments({ listId, comments, user, isOwner, hint }) {
   }
 
   function remove(c) {
-    deleteComment(listId, c.id).catch((err) => toast(friendlyError(err), 'err'));
+    deleteComment(list, c, user).catch((err) => toast(friendlyError(err), 'err'));
   }
 
   return (

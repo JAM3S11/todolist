@@ -122,19 +122,19 @@ export default function Calendar({ lists, byList, user, onOpen }) {
     promise.then(() => okMsg && toast(okMsg)).catch((err) => toast(`Not saved: ${friendlyError(err)}`, 'err'));
   const when = (due, start, mins) => (due ? `${dueLabel(due).toLowerCase()}${start ? `, ${timeRange(start, mins)}` : ''}` : '');
   const actions = {
-    toggle: ({ t, l }) => run(updateTask(l.id, t.id, user, { done: !t.done })),
+    toggle: ({ t, l }) => run(updateTask(l, t, user, { done: !t.done })),
     // just the day (keeps the time); no day = no time either
     due: ({ t, l }, due) => t.due !== due &&
-      run(updateTask(l.id, t.id, user, due ? { due } : { due: null, start: null, mins: null }), due ? `Due ${when(due, t.start, t.mins)}` : 'Due date removed'),
+      run(updateTask(l, t, user, due ? { due } : { due: null, start: null, mins: null }), due ? `Due ${when(due, t.start, t.mins)}` : 'Due date removed'),
     // day + time together; start null = all day
     schedule: ({ t, l }, due, start, mins) => {
       const patch = { due, start: start || null, mins: start ? mins || DEFAULT_MINS : null };
       if (t.due === patch.due && (t.start || null) === patch.start && (t.mins || null) === patch.mins) return;
-      run(updateTask(l.id, t.id, user, patch), `Moved to ${when(due, patch.start, patch.mins)}`);
+      run(updateTask(l, t, user, patch), `Moved to ${when(due, patch.start, patch.mins)}`);
     },
-    notes: ({ t, l }, notes) => (t.notes || '') !== notes && run(updateTask(l.id, t.id, user, { notes }), 'Notes saved'),
-    addLink: ({ t, l }, link) => run(addTaskLink(l.id, t.id, user, link), 'Link added'),
-    removeLink: ({ t, l }, link) => run(removeTaskLink(l.id, t.id, user, link), 'Link removed'),
+    notes: ({ t, l }, notes) => (t.notes || '') !== notes && run(updateTask(l, t, user, { notes }), 'Notes saved'),
+    addLink: ({ t, l }, link) => run(addTaskLink(l, t, user, link), 'Link added'),
+    removeLink: ({ t, l }, link) => run(removeTaskLink(l, t, user, link), 'Link removed'),
     open: ({ t, l }) => { setPop(null); setTray(false); setQuick(null); setPanel({ listId: l.id, taskId: t.id }); },
     openList: (l) => onOpen(l.id),
   };
@@ -888,7 +888,7 @@ function QuickCreate({ quick, lists, user, onClose, onMore }) {
     setBusy(true);
     try {
       const listId = await choice.resolve(user);
-      await addTask(listId, user, v, quick.day, '', time.start ? time : null);
+      await addTask(lists.find((l) => l.id === listId) || { id: listId }, user, v, quick.day, '', time.start ? time : null);
       toast(`Added${choice.isNew ? ` to the new list “${choice.title}”` : ''} for ${dueLabel(quick.day).toLowerCase()}${time.start ? `, ${timeRange(time.start, time.mins)}` : ''}`);
       onClose();
     } catch (er) {
@@ -1157,7 +1157,7 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
       if (!due) return setErr('Pick a date to schedule it for.');
       setBusy(true);
       try {
-        await updateTask(chosen.l.id, chosen.t.id, user, { due, start, mins: start ? time.mins : null });
+        await updateTask(chosen.l, chosen.t, user, { due, start, mins: start ? time.mins : null });
         toast(`“${chosen.t.text}” scheduled for ${dueLabel(due).toLowerCase()}${start ? `, ${timeRange(start, time.mins)}` : ''}`);
         onClose();
       } catch (er) {
@@ -1172,7 +1172,7 @@ function AddTaskDialog({ lists, byList, init, user, onClose }) {
     setBusy(true);
     try {
       const listId = await choice.resolve(user);
-      await addTask(listId, user, v, due, notes.trim(), start ? { start, mins: time.mins } : null);
+      await addTask(lists.find((l) => l.id === listId) || { id: listId }, user, v, due, notes.trim(), start ? { start, mins: time.mins } : null);
       toast(`Added to ${choice.isNew ? 'the new list ' : ''}“${choice.title}”${due ? `, due ${dueLabel(due).toLowerCase()}` : ''}`);
       onClose();
     } catch (er) {

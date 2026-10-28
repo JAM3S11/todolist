@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { dismissInvite, markInviteSeen } from '@/lib/data';
+import { dismissActivity, dismissInvite, markActivitySeen, markInviteSeen } from '@/lib/data';
 import { addDays, dueLabel, fromKey, timeRange, todayKey } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
 import { roleLabel } from '@/lib/permissions';
@@ -13,11 +13,13 @@ const PANEL_MAX = 8;
 // ---------------------------------------------------------------------------
 // Everything that's a notification, newest first:
 //  • share    — someone shared a list with me (stored in Firestore, read state syncs across devices)
+//  • activity — someone else did something on a list or letter I'm on: a comment, a task added / done /
+//               changed / deleted, a rename, someone joining or leaving… (also stored in Firestore; see ACT)
 //  • due      — one of my open tasks is due today
 //  • overdue  — an open task is past its date (last 30 days)
 // Reminders are worked out from the tasks; their read / cleared state is kept in this browser.
 // ---------------------------------------------------------------------------
-export function useNotifications({ invites, lists, tasksByList, uid }) {
+export function useNotifications({ invites, activity = [], lists, tasksByList, uid, openListId = null }) {
   const toast = useToast();
   const storeKey = `notifications:${uid}`;
   const [local, setLocal] = useState({ read: [], gone: [] });
@@ -47,6 +49,19 @@ export function useNotifications({ invites, lists, tasksByList, uid }) {
       });
     }
 
+    for (const a of activity) {
+      const act = ACT[a.kind];
+      const list = byId.get(a.listId);
+      // gone (deleted, or I'm no longer on it): only the notifications that say so still show
+      if (!act || (!list && !act.gone)) continue;
+      out.push({
+        id: `act:${a.id}`, kind: a.kind, activityId: a.id, read: !!a.seen, at: toDate(a.createdAt),
+        listId: a.listId, listTitle: list?.title || a.listTitle, role: list?.role, gone: !list,
+        letter: list ? list.kind === 'letter' : !!a.letter, text: a.text || '', detail: a.detail || '',
+        from: { email: a.fromEmail, displayName: a.fromName },
+      });
+    }
+
     const oldest = addDays(today, -OVERDUE_DAYS);
     for (const list of lists || []) {
       if (list.archived) continue;
@@ -64,38 +79,39 @@ export function useNotifications({ invites, lists, tasksByList, uid }) {
       }
     }
     return out.sort((a, b) => b.at - a.at);
-  }, [invites, lists, tasksByList, local, today]);
+  }, [invites, activity, lists, tasksByList, local, today]);
 
-  // A share that arrives while the app is open also pops a toast
+  // A share or a comment that arrives while the app is open also pops a toast
+  // (not for comments on the list I'm looking at: I can see those already)
   const known = useRef(null);
   useEffect(() => {
-    if (!lists) return; // wait for the lists, or every share would look new on load
-    const shares = items.filter((n) => n.kind === 'share');
+    if (!lists) return; // wait for the lists, or every notification would look new on load
+    const live = items.filter((n) => n.kind === 'share' || ACT[n.kind]);
     if (known.current) {
-      const fresh = shares.filter((n) => !n.read && !known.current.has(n.id));
-      if (fresh.length === 1) {
-        const n = fresh[0];
-        toast(`${n.from.displayName || n.from.email} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`);
-      }
-      else if (fresh.length > 1) toast(`${fresh.length} lists were shared with you`);
+      const fresh = live.filter((n) => !n.read && !known.current.has(n.id) && !(n.kind !== 'share' && n.listId === openListId));
+      if (fresh.length === 1) toast(toastText(fresh[0]));
+      else if (fresh.length > 1) toast(`${fresh.length} new notifications`);
     }
-    known.current = new Set(shares.map((n) => n.id));
-  }, [items, lists, toast]);
+    known.current = new Set(live.map((n) => n.id));
+  }, [items, lists, toast, openListId]);
 
   const fail = (err) => toast(`Couldn't update the notification: ${friendlyError(err)}`, 'err');
   const setRead = (n, on) => {
     if (n.read === on) return;
     if (n.kind === 'share') markInviteSeen(n.inviteId, on).catch(fail);
+    else if (n.activityId) markActivitySeen(n.activityId, on).catch(fail);
     else saveLocal((p) => ({ ...p, read: on ? [...new Set([...p.read, n.id])].slice(-500) : p.read.filter((x) => x !== n.id) }));
   };
   const dismiss = (n) => {
     if (n.kind === 'share') dismissInvite(n.inviteId).catch(fail);
+    else if (n.activityId) dismissActivity(n.activityId).catch(fail);
     else saveLocal((p) => ({ read: p.read.filter((x) => x !== n.id), gone: [...new Set([...p.gone, n.id])].slice(-500) }));
   };
   const markAllRead = () => {
     const unread = items.filter((n) => !n.read);
     unread.filter((n) => n.kind === 'share').forEach((n) => markInviteSeen(n.inviteId, true).catch(fail));
-    const ids = unread.filter((n) => n.kind !== 'share').map((n) => n.id);
+    unread.filter((n) => n.activityId).forEach((n) => markActivitySeen(n.activityId, true).catch(fail));
+    const ids = unread.filter((n) => REMINDER.has(n.kind)).map((n) => n.id);
     if (ids.length) saveLocal((p) => ({ ...p, read: [...new Set([...p.read, ...ids])].slice(-500) }));
   };
 
@@ -111,10 +127,59 @@ const KIND = {
   overdue: { label: 'Overdue', cta: 'Open task' },
 };
 
+// Activity on a list or letter: its tag, and what the person did (read as "<who> <did> “<list>”").
+// text: the task or comment it's about; detail: the extra bit (old name, a date, someone's email, an access level).
+// gone: still shown after the list is gone (that's what it's telling you)
+const quote = (t) => `“${t}”`;
+const dueText = (d) => { const [day, time] = d.split(' '); return `${dueLabel(day).toLowerCase()}${time ? ` at ${time}` : ''}`; };
+const ACT = {
+  comment: { label: 'New comment', group: 'comments', did: () => 'commented on' },
+  'comment-edit': { label: 'Comment edited', group: 'comments', did: () => 'edited a comment on' },
+  'comment-delete': { label: 'Comment deleted', group: 'comments', did: () => 'deleted a comment on' },
+  'task-add': { label: 'Task added', did: (n) => `added ${quote(n.text)}${n.detail ? `, due ${dueText(n.detail)},` : ''} to` },
+  'task-edit': { label: 'Task changed', did: (n) => `renamed ${quote(n.detail)} to ${quote(n.text)} in` },
+  'task-done': { label: 'Task done', did: (n) => `completed ${quote(n.text)} in` },
+  'task-undone': { label: 'Task reopened', did: (n) => `reopened ${quote(n.text)} in` },
+  'task-due': { label: 'Date changed', did: (n) => (n.detail ? `set ${quote(n.text)} for ${dueText(n.detail)} in` : `removed the date from ${quote(n.text)} in`) },
+  'task-notes': { label: 'Notes changed', did: (n) => `updated the notes on ${quote(n.text)} in` },
+  'task-archive': { label: 'Task archived', did: (n) => `archived ${quote(n.text)} in` },
+  'task-restore': { label: 'Task restored', did: (n) => `restored ${quote(n.text)} in` },
+  'task-delete': { label: 'Task deleted', did: (n) => `deleted ${quote(n.text)} from` },
+  'task-link': { label: 'Link added', did: (n) => `added a link to ${quote(n.text)} in` },
+  'task-unlink': { label: 'Link removed', did: (n) => `removed a link from ${quote(n.text)} in` },
+  'letter-edit': { label: 'Letter edited', did: () => 'wrote in' },
+  'list-rename': { label: 'Renamed', did: (n) => `renamed ${quote(n.detail)} to` },
+  'list-archive': { label: 'Archived', did: () => 'archived' },
+  'list-unarchive': { label: 'Unarchived', did: () => 'unarchived' },
+  'list-delete': { label: 'Deleted', gone: true, did: () => 'deleted' },
+  'member-added': { label: 'New member', did: (n) => `gave ${n.detail} access to` },
+  'member-removed': { label: 'Member removed', did: (n) => `removed ${n.detail} from` },
+  'access-changed': { label: 'Your access', did: (n) => `changed your access to ${roleLabel(n.detail).toLowerCase()} on` },
+  'access-removed': { label: 'Access removed', gone: true, did: () => 'removed you from' },
+  'member-left': { label: 'Member left', did: () => 'left' },
+};
+const isComment = (n) => ACT[n.kind]?.group === 'comments';
+const isUpdate = (n) => !!ACT[n.kind] && !isComment(n);
+const REMINDER = new Set(['due', 'overdue']);
+const who = (n) => n.from.displayName || n.from.email;
+const where = (n) => (n.letter ? `the love letter “${n.listTitle}”` : `“${n.listTitle}”`);
+const short = (t) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
+const labelOf = (n) => (ACT[n.kind] || KIND[n.kind]).label;
+const ctaOf = (n) =>
+  n.gone ? null : isComment(n) ? 'Open comments' : ACT[n.kind] || n.kind === 'share' ? (n.letter ? 'Open letter' : 'Open list') : KIND[n.kind].cta;
+
+function toastText(n) {
+  if (n.kind === 'share') return `${who(n)} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`;
+  return `${who(n)} ${ACT[n.kind].did(n)} ${where(n)}${n.kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}`;
+}
+
 function Headline({ n }) {
   if (n.kind === 'share') {
     if (n.letter) return <><b>{n.from.displayName || n.from.email}</b> sent you a love letter, <b>“{n.listTitle}”</b></>;
     return <><b>{n.from.displayName || n.from.email}</b> shared <b>“{n.listTitle}”</b> with you</>;
+  }
+  if (ACT[n.kind]) {
+    return <><b>{who(n)}</b> {ACT[n.kind].did(n)} {n.letter ? 'the love letter ' : ''}<b>“{n.listTitle}”</b></>;
   }
   if (n.kind === 'due') {
     return <><b>“{n.task.text}”</b> is due today{n.task.start ? ` at ${n.task.start}` : ''}</>;
@@ -124,12 +189,20 @@ function Headline({ n }) {
 }
 
 function KindIcon({ n, size = 36 }) {
-  if (n.kind === 'share') {
+  if (n.kind === 'share' || ACT[n.kind]) {
     return (
-      <span className="nt-ic k-share" style={{ width: size, height: size }}>
+      <span className={`nt-ic k-${n.kind === 'share' ? 'share' : isComment(n) ? 'comment' : 'update'}`} style={{ width: size, height: size }}>
         <Avatar person={n.from} size={size} />
         <span className="nt-ic-mini" aria-hidden="true">
-          <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" /></svg>
+          {n.kind === 'share' ? (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12v7a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-7M16 6l-4-4-4 4M12 2v13" /></svg>
+          ) : isComment(n) ? (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 21l1.9-5.4A8 8 0 1 1 21 12z" /></svg>
+          ) : n.kind === 'task-done' ? (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3.4" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6 9 17l-5-5" /></svg>
+          ) : (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z" /></svg>
+          )}
         </span>
       </span>
     );
@@ -217,7 +290,7 @@ export default function Notifications({ api, onOpen, onViewAll }) {
     };
   }, [open]);
 
-  const go = (n) => { api.setRead(n, true); onOpen(n.listId); setOpen(false); };
+  const go = (n) => { api.setRead(n, true); if (!n.gone) onOpen(n.listId); setOpen(false); };
 
   return (
     <div className="notif" ref={box}>
@@ -261,7 +334,7 @@ export default function Notifications({ api, onOpen, onViewAll }) {
                       <div className="np-row-b">
                         <p className="np-row-t"><Headline n={n} /></p>
                         <p className="np-row-m">
-                          <span className={`nt-kind k-${n.kind}`}>{KIND[n.kind].label}</span>
+                          <span className={`nt-kind k-${n.kind}`}>{labelOf(n)}</span>
                           <span className="nt-dot" aria-hidden="true">·</span>
                           <time dateTime={n.at.toISOString()} title={fullTime(n.at)}>{ago(n.at)}</time>
                         </p>
@@ -297,7 +370,7 @@ function Empty({ unreadOnly, filtered, compact }) {
           ? 'There are no unread notifications.'
           : filtered
             ? 'Nothing matches this filter.'
-            : 'When someone shares a list with you, or a task is due, it shows up here.'}
+            : 'When someone shares a list with you, changes something on one, or a task is due, it shows up here.'}
       </span>
     </div>
   );
@@ -310,7 +383,9 @@ const FILTERS = {
   all: { label: 'All', test: () => true },
   unread: { label: 'Unread', test: (n) => !n.read },
   share: { label: 'Shared with you', test: (n) => n.kind === 'share' },
-  reminders: { label: 'Reminders', test: (n) => n.kind !== 'share' },
+  updates: { label: 'Updates', test: isUpdate },
+  comments: { label: 'Comments', test: isComment },
+  reminders: { label: 'Reminders', test: (n) => REMINDER.has(n.kind) },
 };
 
 export function NotificationsPage({ api, onOpen }) {
@@ -318,23 +393,23 @@ export function NotificationsPage({ api, onOpen }) {
   const [query, setQuery] = useState('');
   const { items, unread } = api;
   const q = query.trim().toLowerCase();
-  const text = (n) => `${n.listTitle} ${n.task?.text || ''} ${n.from?.displayName || ''} ${n.from?.email || ''}`.toLowerCase();
+  const text = (n) => `${n.listTitle} ${n.task?.text || ''} ${n.text || ''} ${n.detail || ''} ${n.from?.displayName || ''} ${n.from?.email || ''}`.toLowerCase();
   const shown = items.filter((n) => FILTERS[filter].test(n) && (!q || text(n).includes(q)));
   const count = (k) => items.filter(FILTERS[k].test).length;
   const stats = [
     { label: 'Unread', value: unread, tone: 'accent' },
-    { label: 'Shared with you', value: count('share'), tone: '' },
+    { label: 'Updates', value: count('updates') + count('comments'), tone: '' },
     { label: 'Due today', value: items.filter((n) => n.kind === 'due').length, tone: 'warn' },
     { label: 'Overdue', value: items.filter((n) => n.kind === 'overdue').length, tone: 'danger' },
   ];
-  const go = (n) => { api.setRead(n, true); onOpen(n.listId); };
+  const go = (n) => { api.setRead(n, true); if (!n.gone) onOpen(n.listId); };
 
   return (
     <div className="ntp">
       <header className="bar">
         <div className="bar-left">
           <h1>Notifications</h1>
-          <div className="meta">{unread ? `${unread} unread` : 'All caught up'} · lists shared with you and task reminders</div>
+          <div className="meta">{unread ? `${unread} unread` : 'All caught up'} · shares, changes, comments and task reminders</div>
         </div>
         <div className="bar-right">
           <button className="btn" type="button" onClick={api.markAllRead} disabled={!unread}>
@@ -381,7 +456,7 @@ export function NotificationsPage({ api, onOpen }) {
                     <KindIcon n={n} size={42} />
                     <div className="ntp-row-b">
                       <div className="ntp-row-top">
-                        <span className={`nt-kind k-${n.kind}`}>{KIND[n.kind].label}</span>
+                        <span className={`nt-kind k-${n.kind}`}>{labelOf(n)}</span>
                         <time dateTime={n.at.toISOString()} title={fullTime(n.at)}>{ago(n.at)}</time>
                         {!n.read && <span className="ntp-new">New</span>}
                       </div>
@@ -389,7 +464,7 @@ export function NotificationsPage({ api, onOpen }) {
                       <Details n={n} />
                     </div>
                     <div className="ntp-row-side">
-                      <button type="button" className="btn small-btn" onClick={() => go(n)}>{n.letter ? 'Open letter' : KIND[n.kind].cta}</button>
+                      {ctaOf(n) && <button type="button" className="btn small-btn" onClick={() => go(n)}>{ctaOf(n)}</button>}
                       <RowActions n={n} api={api} />
                     </div>
                   </li>
@@ -414,6 +489,15 @@ function Details({ n }) {
         {list}
         {n.role && <span className={`pill ${n.role}`}>{roleLabel(n.role)}</span>}
         <span className="ntp-d-extra">from {n.from.email}</span>
+        <span className="ntp-d-extra">{fullTime(n.at)}</span>
+      </div>
+    );
+  }
+  if (ACT[n.kind]) {
+    return (
+      <div className="ntp-d">
+        {n.gone ? <span className="ntp-list-chip nt-gone">{n.listTitle}</span> : list}
+        {isComment(n) && n.text && <span className={n.kind === 'comment-delete' ? 'ntp-notes nt-gone' : 'ntp-notes'} title={n.text}>“{n.text}”</span>}
         <span className="ntp-d-extra">{fullTime(n.at)}</span>
       </div>
     );
