@@ -3,7 +3,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
 import {
   addTask,
+  addTaskLink,
   deleteTask,
+  removeTaskLink,
   renameList,
   updateTask,
   watchComments,
@@ -108,6 +110,8 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
       due ? `Due ${dueLabel(due).toLowerCase()}` : 'Due date removed'),
     onArchive: () => run(updateTask(list.id, t.id, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
     onDelete: () => run(deleteTask(list.id, t.id), 'Task deleted'),
+    onAddLink: (link) => run(addTaskLink(list.id, t.id, user, link), 'Link added'),
+    onRemoveLink: (link) => run(removeTaskLink(list.id, t.id, user, link), 'Link removed'),
   });
 
   return (

@@ -42,7 +42,7 @@ export function useNotifications({ invites, lists, tasksByList, uid }) {
       if (!list) continue; // deleted, or my access was removed
       out.push({
         id: `share:${inv.id}`, kind: 'share', inviteId: inv.id, read: !!inv.seen, at: toDate(inv.createdAt),
-        listId: list.id, listTitle: list.title, role: list.role,
+        listId: list.id, listTitle: list.title, role: list.role, letter: list.kind === 'letter',
         from: { email: inv.fromEmail, displayName: inv.fromName },
       });
     }
@@ -73,7 +73,10 @@ export function useNotifications({ invites, lists, tasksByList, uid }) {
     const shares = items.filter((n) => n.kind === 'share');
     if (known.current) {
       const fresh = shares.filter((n) => !n.read && !known.current.has(n.id));
-      if (fresh.length === 1) toast(`${fresh[0].from.displayName || fresh[0].from.email} shared “${fresh[0].listTitle}” with you`);
+      if (fresh.length === 1) {
+        const n = fresh[0];
+        toast(`${n.from.displayName || n.from.email} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`);
+      }
       else if (fresh.length > 1) toast(`${fresh.length} lists were shared with you`);
     }
     known.current = new Set(shares.map((n) => n.id));
@@ -110,6 +113,7 @@ const KIND = {
 
 function Headline({ n }) {
   if (n.kind === 'share') {
+    if (n.letter) return <><b>{n.from.displayName || n.from.email}</b> sent you a love letter, <b>“{n.listTitle}”</b></>;
     return <><b>{n.from.displayName || n.from.email}</b> shared <b>“{n.listTitle}”</b> with you</>;
   }
   if (n.kind === 'due') {
@@ -385,7 +389,7 @@ export function NotificationsPage({ api, onOpen }) {
                       <Details n={n} />
                     </div>
                     <div className="ntp-row-side">
-                      <button type="button" className="btn small-btn" onClick={() => go(n)}>{KIND[n.kind].cta}</button>
+                      <button type="button" className="btn small-btn" onClick={() => go(n)}>{n.letter ? 'Open letter' : KIND[n.kind].cta}</button>
                       <RowActions n={n} api={api} />
                     </div>
                   </li>

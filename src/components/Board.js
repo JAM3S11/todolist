@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
+import { linkLabel } from '@/lib/links';
 import { roleLabel } from '@/lib/permissions';
 import { Avatar, colorFor, timeAgo } from '@/lib/people';
 import ListMenu from './ListMenu';
@@ -18,14 +19,15 @@ function move(ids, id, to) {
   return next;
 }
 
-// Search: list names, and the text and notes of the tasks inside them
+// Search: list names, and the text, notes and links of the tasks inside them
 const has = (text, q) => !!text && text.toLowerCase().includes(q);
+const linkHit = (t, q) => (t.links || []).find((l) => has(l.title, q) || has(l.url, q));
 function searchLists(lists, tasksByList, q) {
   const out = [];
   for (const l of lists) {
     const tasks = (tasksByList[l.id] || [])
-      .filter((t) => !t.archived && (has(t.text, q) || has(t.notes, q)))
-      .sort((a, b) => a.done - b.done || has(b.text, q) - has(a.text, q)); // open first, then title matches before notes matches
+      .filter((t) => !t.archived && (has(t.text, q) || has(t.notes, q) || linkHit(t, q)))
+      .sort((a, b) => a.done - b.done || has(b.text, q) - has(a.text, q)); // open first, then title matches before notes and link matches
     if (has(l.title, q) || tasks.length) out.push({ list: l, titleHit: has(l.title, q), tasks });
   }
   // name matches first, then the most matching tasks
@@ -240,6 +242,9 @@ function BoardCard({ list, tasks = null, favorite, actions, onOpen, dragging, gr
             <li key={t.id} className={t.done ? 'done' : ''}>
               <Hl text={t.text} q={q} />
               {!has(t.text, q) && has(t.notes, q) && <span className="hit-note">in notes: <Hl text={t.notes} q={q} /></span>}
+              {!has(t.text, q) && !has(t.notes, q) && linkHit(t, q) && (
+                <span className="hit-note">in links: <Hl text={linkLabel(linkHit(t, q))} q={q} /></span>
+              )}
             </li>
           ))}
           {match.tasks.length > 4 && <li className="muted">+{match.tasks.length - 4} more matching</li>}
@@ -309,7 +314,7 @@ function BoardSearch({ query, setQuery, q, results, onOpen }) {
           {item.task ? (
             <>
               <i style={{ background: colorFor(item.list.id) }} />{item.list.title}
-              {!has(item.task.text, q) && ' · in notes'}
+              {!has(item.task.text, q) && (has(item.task.notes, q) ? ' · in notes' : ' · in links')}
               {item.task.done && ' · done'}
             </>
           ) : (

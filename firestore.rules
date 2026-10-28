@@ -12,7 +12,8 @@ rules_version = '2';
 //
 //  To-do data layout
 //    users/{uid}                         profile, the list you had open last, your favourite lists, your list order
-//    lists/{listId}                      title, owner, and who it's shared with:
+//    lists/{listId}                      title, owner, and who it's shared with
+//                                        (kind: 'letter' = a love letter: a body, shared with one person at most):
 //        roles:        { "friend@mail.com": "read" | "comment" | "write" | "readwrite" }
 //        memberEmails: [ "friend@mail.com", ... ]   (same emails, for searching)
 //        leftEmails:   [ "gone@mail.com", ... ]     (left on their own; shown to the owner until re-shared)
@@ -125,9 +126,15 @@ service cloud.firestore {
         && leftOf(d).size() <= 100
         && leftOf(d).toSet().intersection(d.memberEmails.toSet()).size() == 0;
     }
+    // A list is a to-do list, or a love letter: a written body shared with at most one person
+    function kindOf(d) { return d.get('kind', 'list'); }
+    function validBody(d) { return d.get('body', '') is string && d.get('body', '').size() <= 20000; }
     function validList(d) {
-      return d.keys().hasOnly(['title', 'ownerId', 'ownerEmail', 'ownerName', 'roles', 'memberEmails', 'leftEmails', 'archived', 'createdAt', 'updatedAt'])
+      return d.keys().hasOnly(['title', 'kind', 'body', 'ownerId', 'ownerEmail', 'ownerName', 'roles', 'memberEmails', 'leftEmails', 'archived', 'createdAt', 'updatedAt'])
         && d.title is string && d.title.size() >= 1 && d.title.size() <= 120
+        && kindOf(d) in ['list', 'letter']
+        && validBody(d)
+        && (kindOf(d) == 'list' || d.memberEmails.size() <= 1)
         && d.get('archived', false) is bool
         && validRoles(d)
         && validLeft(d);
@@ -164,10 +171,15 @@ service cloud.firestore {
         (resource.data.ownerId == request.auth.uid
           && request.resource.data.ownerId == resource.data.ownerId
           && request.resource.data.ownerEmail == resource.data.ownerEmail
+          && kindOf(request.resource.data) == kindOf(resource.data)
           && validList(request.resource.data))
         // write roles: only bump "last changed" when they edit tasks
         || (canWrite(roleIn(resource.data))
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['updatedAt']))
+        // write roles on a love letter: edit the letter itself
+        || (canWrite(roleIn(resource.data)) && kindOf(resource.data) == 'letter'
+          && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['body', 'updatedAt'])
+          && validBody(request.resource.data))
         // any member: leave the list (remove only yourself, and record that you left)
         || (hasEmail() && roleIn(resource.data) != null && roleIn(resource.data) != 'owner'
           && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['roles', 'memberEmails', 'leftEmails'])
@@ -184,13 +196,15 @@ service cloud.firestore {
       // ---------- tasks ----------
       match /tasks/{taskId} {
         function validTask(d) {
-          return d.keys().hasOnly(['text', 'done', 'archived', 'due', 'start', 'mins', 'notes', 'createdBy', 'createdByName',
+          return d.keys().hasOnly(['text', 'done', 'archived', 'due', 'start', 'mins', 'notes', 'links', 'createdBy', 'createdByName',
                                    'createdAt', 'updatedAt', 'updatedBy', 'updatedByName'])
             // optional time on the due day: start 'HH:MM', length in minutes
             && (d.get('start', null) == null || (d.start is string && d.start.matches('([01][0-9]|2[0-3]):[0-5][0-9]')))
             && (d.get('mins', null) == null || (d.mins is int && d.mins >= 5 && d.mins <= 1440))
             // optional notes: what's going to be done
             && (d.get('notes', '') is string && d.get('notes', '').size() <= 2000)
+            // optional links: [{ url, title }], up to 10 (the app checks each one is http(s))
+            && (d.get('links', []) is list && d.get('links', []).size() <= 10)
             && d.text is string && d.text.size() >= 1 && d.text.size() <= 500
             && d.done is bool && d.archived is bool
             // optional due date: a whole day, 'YYYY-MM-DD'

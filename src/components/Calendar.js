@@ -1,6 +1,6 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { addTask, createList, updateTask, watchTasks } from '@/lib/data';
+import { addTask, addTaskLink, createList, removeTaskLink, updateTask, watchTasks } from '@/lib/data';
 import {
   DEFAULT_MINS, DURATIONS, TIMES, addDays, dueLabel, durLabel, fromKey, fromMin, isOverdue, longDay, monthDays,
   monthTitle, snap, timeRange, toKey, toMin, todayKey, weekday,
@@ -12,6 +12,7 @@ import { colorFor, initials, toDate } from '@/lib/people';
 import DuePicker from './DuePicker';
 import Loading, { Spinner } from './Loading';
 import Select, { inDropdown } from './Select';
+import TaskLinks from './TaskLinks';
 import { useToast } from './Toast';
 
 const HEADS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -132,6 +133,8 @@ export default function Calendar({ lists, byList, user, onOpen }) {
       run(updateTask(l.id, t.id, user, patch), `Moved to ${when(due, patch.start, patch.mins)}`);
     },
     notes: ({ t, l }, notes) => (t.notes || '') !== notes && run(updateTask(l.id, t.id, user, { notes }), 'Notes saved'),
+    addLink: ({ t, l }, link) => run(addTaskLink(l.id, t.id, user, link), 'Link added'),
+    removeLink: ({ t, l }, link) => run(removeTaskLink(l.id, t.id, user, link), 'Link removed'),
     open: ({ t, l }) => { setPop(null); setTray(false); setQuick(null); setPanel({ listId: l.id, taskId: t.id }); },
     openList: (l) => onOpen(l.id),
   };
@@ -1031,6 +1034,7 @@ function TaskPanel({ entry, actions, onClose }) {
         <span>{t.text}</span>
       </label>
       <NotesField key={t.id} value={t.notes || ''} canEdit={write} onSave={(notes) => actions.notes(entry, notes)} />
+      <PanelLinks key={`links-${t.id}`} entry={entry} canEdit={write} actions={actions} />
       <dl className="cal-panel-d">
         <dt>Date</dt>
         <dd><DuePicker value={t.due || null} task={t} canEdit={write} onChange={(due) => actions.due(entry, due)} /></dd>
@@ -1053,6 +1057,15 @@ function TaskPanel({ entry, actions, onClose }) {
       {!write && <p className="cal-hint">You can view this task but not change it.</p>}
       <button type="button" className="btn block" onClick={() => actions.openList(l)}>Open “{l.title}”</button>
     </aside>
+  );
+}
+
+// Links on the task; the add form closes when another task opens (keyed by task)
+function PanelLinks({ entry, canEdit, actions }) {
+  const [adding, setAdding] = useState(false);
+  return (
+    <TaskLinks links={entry.t.links} canEdit={canEdit} adding={adding} setAdding={setAdding} addButton
+      onAdd={(link) => actions.addLink(entry, link)} onRemove={(link) => actions.removeLink(entry, link)} />
   );
 }
 

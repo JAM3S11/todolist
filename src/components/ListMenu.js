@@ -34,13 +34,13 @@ export default function ListMenu({ list, favorite, actions }) {
       </button>
       {open && (
         <div className="menu-p" role="menu">
-          {isOwner && item('✎ Edit name', actions.rename)}
+          {isOwner && item(list.kind === 'letter' ? '✎ Edit title' : '✎ Edit name', actions.rename)}
           {item(favorite ? '★ Remove from favourites' : '☆ Add to favourites', actions.favorite)}
           {item('👥 See members', actions.members)}
           {isOwner && item(list.archived ? '↩ Unarchive' : '🗄 Archive', actions.archive)}
           {isOwner
             ? item('🗑 Delete', actions.remove, 'danger')
-            : item('⎋ Leave list', actions.leave, 'danger')}
+            : item(list.kind === 'letter' ? '⎋ Leave letter' : '⎋ Leave list', actions.leave, 'danger')}
         </div>
       )}
     </div>

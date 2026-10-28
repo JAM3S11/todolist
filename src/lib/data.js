@@ -84,9 +84,12 @@ export function watchSharedLists(email, onData, onError) {
   );
 }
 
-export async function createList(user, title) {
+// kind: 'list' (to-do) or 'letter' (a love letter: a written body, shared with one person at most)
+export async function createList(user, title, kind = 'list') {
   const ref = await addDoc(collection(db(), 'lists'), {
     title,
+    kind,
+    ...(kind === 'letter' ? { body: '' } : {}),
     ownerId: user.uid,
     ownerEmail: emailOf(user),
     ownerName: nameOf(user),
@@ -98,6 +101,11 @@ export async function createList(user, title) {
   });
   return ref.id;
 }
+
+export const createLetter = (user, title) => createList(user, title, 'letter');
+
+// The owner, and Write / Read & write recipients, can change what the letter says
+export const saveLetterBody = (id, body) => updateDoc(listRef(id), { body, updatedAt: serverTimestamp() });
 
 export const renameList = (id, title) => updateDoc(listRef(id), { title, updatedAt: serverTimestamp() });
 
@@ -176,6 +184,7 @@ export const dismissInvite = (id) => writeBatch(db()).delete(doc(db(), 'invites'
 // Optional: queue invitation emails for the "Trigger Email" Firebase extension
 export async function queueInviteEmails(list, emails, inviter, link) {
   const from = nameOf(inviter);
+  const what = list.kind === 'letter' ? 'a love letter' : 'the to-do list';
   await Promise.all(
     emails.map((to) =>
       addDoc(collection(db(), 'mail'), {
@@ -184,9 +193,9 @@ export async function queueInviteEmails(list, emails, inviter, link) {
         createdBy: inviter.uid,
         message: {
           subject: `${from} shared “${list.title}” with you`,
-          text: `${from} shared the to-do list “${list.title}” with you.\n\nOpen it: ${link}\n\nSign in or create an account with ${to} to see it.`,
-          html: `<p>${escapeHtml(from)} shared the to-do list <b>${escapeHtml(list.title)}</b> with you.</p>
-<p><a href="${link}">Open the list</a></p>
+          text: `${from} shared ${what} “${list.title}” with you.\n\nOpen it: ${link}\n\nSign in or create an account with ${to} to see it.`,
+          html: `<p>${escapeHtml(from)} shared ${what} <b>${escapeHtml(list.title)}</b> with you.</p>
+<p><a href="${link}">Open it</a></p>
 <p>Sign in or create an account with <b>${escapeHtml(to)}</b> to see it.</p>`,
         },
       }),
@@ -227,6 +236,10 @@ export function updateTask(listId, taskId, user, patch) {
   b.update(listRef(listId), { updatedAt: serverTimestamp() });
   return b.commit();
 }
+
+// links: { url, title } (see lib/links.js). Union/remove, so two people adding at once don't overwrite each other
+export const addTaskLink = (listId, taskId, user, link) => updateTask(listId, taskId, user, { links: arrayUnion(link) });
+export const removeTaskLink = (listId, taskId, user, link) => updateTask(listId, taskId, user, { links: arrayRemove(link) });
 
 export function deleteTask(listId, taskId) {
   const b = writeBatch(db());

@@ -1129,6 +1129,36 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 .cal-notes-read { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunk); font-size: 14px; white-space: pre-wrap; }
 .task-notes { margin: 2px 0 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; text-decoration: none; }
 
+/* links on a task: chips that open in a new tab, and the small "add a link" form */
+.task-links { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
+.link-chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 0; padding: 0; list-style: none; }
+/* in a task row: the text, then its link chips on the same line */
+.t-line { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; }
+.t-line .link-chips { display: inline-flex; }
+.t-line .link-chip { height: 22px; }
+.task.done .t-line > span:first-child { text-decoration: line-through; } /* the strike-through doesn't reach inside the inline-flex line */
+.link-chip { display: inline-flex; align-items: center; max-width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surface); font-size: 12px; text-decoration: none; }
+.link-chip:hover { border-color: var(--accent); }
+.link-chip a { display: inline-flex; align-items: center; gap: 5px; min-width: 0; height: 100%; padding: 0 10px; color: var(--fg); text-decoration: none; }
+.link-chip:has(.link-x) a { padding-right: 4px; }
+.link-chip a svg { flex: none; color: var(--accent); }
+.link-chip a span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px; }
+.link-x { flex: none; width: 22px; height: 22px; margin-right: 2px; border: none; border-radius: 50%; background: transparent; color: var(--muted); font-size: 10px; }
+.link-x:hover { background: var(--danger-soft); color: var(--danger); }
+.link-form { display: flex; flex-direction: column; gap: 6px; padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: var(--sunk); }
+.task .t .link-form input, .link-form input { width: 100%; border-color: var(--line); padding: 8px 10px; font-size: 14px; }
+.task .t .link-form input:focus, .link-form input:focus { border-color: var(--accent); }
+.link-form-b { display: flex; gap: 6px; }
+.link-form-b .btn { padding: 6px 12px; font-size: 13px; }
+.link-err { margin: 0; font-size: 12px; color: var(--danger); }
+.link-add { align-self: flex-start; padding: 5px 0; color: var(--accent); font-weight: 500; }
+@media (max-width: 860px) {
+  .task .t .link-form input { font-size: 16px; } /* no zoom-in on iPhone */
+  .link-chip { height: 32px; font-size: 13px; }
+  .link-chip a span { max-width: 180px; }
+}
+
 /* ---------- Notifications page ---------- */
 .ntp { display: flex; flex-direction: column; gap: 18px; max-width: 980px; margin: 0 auto; }
 .ntp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
@@ -1210,4 +1240,99 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
   .ntp-row-side .btn { margin-right: auto; height: 30px; padding: 0 12px; }
   .ntp-row-side .nt-acts { border: none; padding: 0; background: none; }
   .ntp-bar { top: 12px; bottom: 12px; }
+}
+
+/* ---------- Love letters: old paper with burnt edges ---------- */
+:root {
+  --paper: #f6e7c8; --paper-light: #fdf5e2; --paper-tan: #dcb57a;
+  --paper-ink: #3b2412; --paper-faded: #7a5a3c;
+  --scorch: #5a2a0a; --char: #1e0d03; --ember: #c2621f; --seal: #a3202a;
+  --hand: 'Caveat', 'Segoe Script', cursive;
+  --letter: 'EB Garamond', Georgia, serif;
+}
+
+.paper { position: relative; isolation: isolate; color: var(--paper-ink); transform: rotate(var(--tilt, 0deg));
+  filter: drop-shadow(0 8px 18px rgb(0 0 0 / .45)); }
+.paper-defs { position: absolute; width: 0; height: 0; overflow: hidden; }
+/* the paper itself, ragged by the SVG filter: light in the middle, tan toward the edge, then scorched and charred */
+.paper-edge { position: absolute; inset: 6px; z-index: -1; border-radius: 3px;
+  background:
+    radial-gradient(circle at 6% 8%, rgb(90 42 10 / .28), transparent 9%),
+    radial-gradient(circle at 95% 92%, rgb(90 42 10 / .3), transparent 10%),
+    radial-gradient(circle at 92% 6%, rgb(90 42 10 / .18), transparent 7%),
+    radial-gradient(ellipse at 50% 45%, var(--paper-light) 0%, var(--paper) 55%, var(--paper-tan) 100%);
+  box-shadow:
+    inset 0 0 0 2px var(--char),
+    inset 0 0 6px 3px #2b1203,
+    inset 0 0 26px 10px rgb(90 42 10 / .7),
+    inset 0 0 46px 22px rgb(194 98 31 / .16); }
+.paper-in { position: relative; padding: 34px 36px 30px; }
+
+/* the page of cards */
+.letters-wrap { max-width: 1080px; margin: 0 auto; width: 100%; }
+.letters-sec { display: flex; flex-direction: column; gap: 14px; }
+.letters-h { margin: 0; font-size: 15px; font-family: var(--mono); font-weight: 600; color: var(--muted); display: flex; gap: 8px; align-items: center; }
+.letters-h .count { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--sunk); }
+.letters { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 26px 22px; padding: 6px 4px 10px; }
+.letters-empty { margin: 0; }
+
+.letter-card { cursor: pointer; min-height: 230px; display: flex; outline: none; }
+.letter-card .paper-in { display: flex; flex-direction: column; gap: 10px; width: 100%; padding: 30px 28px 24px; }
+.letter-card:focus-visible .paper-edge { outline: 3px solid var(--accent); outline-offset: 4px; }
+.letter-card-h { display: flex; align-items: flex-start; gap: 6px; }
+.letter-card-h h3 { margin: 0; flex: 1; min-width: 0; font-family: var(--hand); font-size: 30px; font-weight: 700; line-height: 1.05; overflow-wrap: anywhere; }
+.letter-card-h .star { color: var(--ember); }
+.letter-card-h .dots { color: var(--paper-faded); }
+.letter-card-h .menu-p { color: var(--fg); }
+.letter-card-p { margin: 0; flex: 1; font-family: var(--letter); font-size: 17px; font-style: italic; line-height: 1.45; color: var(--paper-ink);
+  display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; }
+.letter-card-p.empty { color: var(--paper-faded); }
+.letter-card-f { display: flex; justify-content: space-between; gap: 10px; font-family: var(--mono); font-size: 11.5px; color: var(--paper-faded);
+  border-top: 1px dashed rgb(90 42 10 / .35); padding-top: 8px; }
+.letter-new { min-height: 230px; display: flex; flex-direction: column; gap: 6px; align-items: center; justify-content: center;
+  border: 2px dashed var(--line); border-radius: 12px; background: transparent; color: var(--muted); font-size: 14px; }
+.letter-new span { font-size: 28px; color: var(--ember); line-height: 1; }
+.letter-new:hover { border-color: var(--ember); color: var(--fg); }
+
+/* a red wax seal on letters written to you */
+.seal { position: absolute; top: -6px; right: 22px; z-index: 2; width: 38px; height: 38px; border-radius: 50%; display: grid; place-items: center;
+  color: rgb(255 220 210 / .85);
+  background: radial-gradient(circle at 35% 30%, #d0434b, var(--seal) 55%, #6b1118 100%);
+  box-shadow: 0 2px 4px rgb(0 0 0 / .4), inset 0 -2px 4px rgb(0 0 0 / .35), 0 0 0 3px rgb(163 32 42 / .35); }
+
+@media (prefers-reduced-motion: no-preference) {
+  .letter-card { transition: transform .2s ease, filter .2s ease; }
+  .letter-card:hover, .letter-card:focus-visible { transform: rotate(0deg) translateY(-4px); filter: drop-shadow(0 14px 24px rgb(0 0 0 / .5)); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .paper { transform: none; }
+}
+
+/* one open letter */
+.letter-sheet { min-width: 0; }
+.letter-paper { max-width: 720px; margin: 0 auto; }
+.letter-paper .paper-in { padding: 52px 58px 44px; display: flex; flex-direction: column; gap: 14px; }
+.letter-title { margin: 0; font-family: var(--hand); font-size: 40px; font-weight: 700; line-height: 1.05; overflow-wrap: anywhere; }
+.letter-body { font-family: var(--letter); font-size: 19px; line-height: 1.7; color: var(--paper-ink); white-space: pre-wrap; overflow-wrap: anywhere; }
+.letter-body.read { margin: 0; }
+.letter-body.read.empty { color: var(--paper-faded); font-style: italic; }
+textarea.letter-body { width: 100%; min-height: 340px; resize: none; field-sizing: content; padding: 6px 8px; margin: 0 -8px;
+  background: transparent; border: none; border-radius: 6px; color: var(--paper-ink); caret-color: var(--scorch); }
+textarea.letter-body::placeholder { color: var(--paper-faded); font-style: italic; }
+textarea.letter-body:focus { outline: none; box-shadow: 0 0 0 2px rgb(90 42 10 / .22); background: rgb(255 250 235 / .35); }
+.letter-status { min-height: 18px; font-family: var(--mono); font-size: 11.5px; color: var(--paper-faded); }
+.letter-sign { margin: 6px 0 0; align-self: flex-end; font-family: var(--hand); font-size: 26px; color: var(--paper-ink); }
+
+@media (max-width: 860px) {
+  .letters { grid-template-columns: minmax(0, 1fr); gap: 22px; }
+  .paper { --tilt: 0deg !important; }
+  .paper-edge { box-shadow:
+    inset 0 0 0 2px var(--char),
+    inset 0 0 5px 2px #2b1203,
+    inset 0 0 16px 6px rgb(90 42 10 / .65),
+    inset 0 0 30px 14px rgb(194 98 31 / .14); }
+  .letter-paper .paper-in { padding: 38px 28px 32px; }
+  .letter-title { font-size: 32px; }
+  .letter-body { font-size: 17.5px; }
+  textarea.letter-body { min-height: 260px; font-size: 17.5px; }
 }
