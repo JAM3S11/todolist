@@ -12,7 +12,7 @@ A to-do list app where you can share any list with other people and choose what 
 
 Everything is saved to **Firebase** the moment it happens. When you sign in on any device, the app reopens the list you were last on, with every task and comment as you left it. Changes from other people appear live. A copy is also kept in your browser, so the app opens instantly and keeps working offline; changes sync when you're back online.
 
-A **Spotify player** sits in the sidebar and keeps playing while you move around the app. On the **Music** page you search Spotify, paste the song, album or playlist link, and it is kept there for next time. Your music and what's playing are saved on your profile, so they follow you to every device. People signed in to Spotify in that browser hear full songs; everyone else gets 30-second previews.
+A **Spotify player** sits in the sidebar and keeps playing while you move around the app. ⏮ and ⏭ move through your saved music, 🔁 repeats the song, and when a song ends the next one starts. On the **Music** page you type a song name, pick the right version from the list (song, artist, album, year), copy its link on Spotify and press Ctrl+V; it is kept there for next time. The song list comes from Apple's free iTunes Search, so no Spotify developer account or Premium is needed. Your music and what's playing are saved on your profile, so they follow you to every device. People signed in to Spotify in that browser hear full songs; everyone else gets 30-second previews.
 
 Stack: **Next.js 15** (React 19), **Firebase Authentication** (email/password and Google) and **Cloud Firestore** (database, live updates, offline cache).
 
@@ -188,7 +188,7 @@ Every action is saved straight away. Firestore shows the change on screen at onc
 users/{uid}
   email, displayName, lastListId, favorites, listOrder, updatedAt
   spotify   what the sidebar player is playing
-  music     [ { type, id, title, image, addedAt } ]   ← songs kept on the Music page (up to 100)
+  music     [ { type, id, title, artist, image, addedAt } ]   ← songs kept on the Music page (up to 100)
 
 lists/{listId}
   title, ownerId, ownerEmail, ownerName, createdAt, updatedAt
@@ -225,7 +225,7 @@ src/app/globals.css          All styling (light and dark mode)
 src/components/
   Login.js                   Email/password, Google, forgot password
   Workspace.js               Sidebar, restores your last list, notification bell, leaving a list
-  Music.js                   Music page: search Spotify, keep songs, play them
+  Music.js                   Music page: find songs by name, keep them, play them
   MusicPlayer.js             Spotify player in the sidebar
   Notifications.js           Bell with "X shared a list with you"; click one to open the list
   ListView.js                Tasks, live updates, role-based buttons

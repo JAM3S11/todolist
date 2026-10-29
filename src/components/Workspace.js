@@ -407,7 +407,7 @@ function WorkspaceInner({ user }) {
             )}
           </div>
 
-          <MusicPlayer user={user} link={nowPlaying} onOpenMusic={() => { setView('music'); setMenuOpen(false); }}
+          <MusicPlayer user={user} link={nowPlaying} music={music} onOpenMusic={() => { setView('music'); setMenuOpen(false); }}
             icon={<Icon name="music" />} />
 
           <div className="me">
