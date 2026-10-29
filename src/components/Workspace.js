@@ -25,6 +25,7 @@ import {
   watchSharedLists,
 } from '@/lib/data';
 import { roleLabel } from '@/lib/permissions';
+import { disablePush, refreshPush } from '@/lib/push';
 import { Avatar, colorFor, displayName, toDate } from '@/lib/people';
 import Board from './Board';
 import Calendar, { dueNowCount, taskEntries, useAllTasks } from './Calendar';
@@ -104,6 +105,11 @@ function WorkspaceInner({ user }) {
   // ---- save my profile once per sign-in
   useEffect(() => {
     saveProfile(user).catch(() => {});
+  }, [user]);
+
+  // ---- device notifications: if they're on for this device, keep its token current
+  useEffect(() => {
+    refreshPush(user).catch(() => {});
   }, [user]);
 
   // ---- live list of everything I own
@@ -259,8 +265,10 @@ function WorkspaceInner({ user }) {
   }
 
   // Clear ?list= and ?view= so the next person to sign in here starts on My List
-  function onSignOut() {
+  // Device notifications stop too, so the next person on this device doesn't get mine
+  async function onSignOut() {
     window.history.replaceState(null, '', window.location.pathname);
+    await disablePush().catch(() => {});
     signOut(fb().auth);
   }
 
@@ -313,7 +321,7 @@ function WorkspaceInner({ user }) {
             <span aria-hidden="true" />
           </button>
           <div className="brand"><Emblem size={28} /><span className="brand-name">Shared To-Do</span></div>
-          <Notifications api={notif} onOpen={pick} onViewAll={showNotifications} />
+          <Notifications api={notif} user={user} onOpen={pick} onViewAll={showNotifications} />
           <button className="side-btn collapse only-desktop" type="button" onClick={toggleRail}
             aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} title={rail ? 'Expand sidebar' : 'Collapse sidebar'}>
             <Icon name="sidebar" />
@@ -400,7 +408,7 @@ function WorkspaceInner({ user }) {
         {lists === null ? (
           <Loading variant="page" hint="Getting your lists ready" />
         ) : view === 'notifications' ? (
-          <NotificationsPage api={notif} onOpen={pick} />
+          <NotificationsPage api={notif} user={user} onOpen={pick} />
         ) : view === 'calendar' ? (
           <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
         ) : view === 'letters' ? (

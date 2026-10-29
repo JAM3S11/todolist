@@ -110,14 +110,14 @@ export function saveLetterBody(list, user, body, tell = false) {
   const b = writeBatch(db());
   b.update(listRef(list.id), { body, updatedAt: serverTimestamp() });
   if (tell) notify(b, list, user, 'letter-edit');
-  return b.commit();
+  return send(b);
 }
 
 export function renameList(list, user, title) {
   const b = writeBatch(db());
   b.update(listRef(list.id), { title, updatedAt: serverTimestamp() });
   notify(b, { ...list, title }, user, 'list-rename', { detail: list.title });
-  return b.commit();
+  return send(b);
 }
 
 // Archived lists move to their own section for everyone; nothing is deleted
@@ -125,7 +125,7 @@ export function archiveList(list, user, archived) {
   const b = writeBatch(db());
   b.update(listRef(list.id), { archived });
   notify(b, list, user, archived ? 'list-archive' : 'list-unarchive');
-  return b.commit();
+  return send(b);
 }
 
 // Firestore doesn't delete sub-collections automatically, so remove tasks and comments first.
@@ -142,7 +142,7 @@ export async function deleteList(list, user) {
   const b = writeBatch(db());
   b.delete(listRef(id));
   notify(b, list, user, 'list-delete');
-  await b.commit();
+  await send(b);
 }
 
 // ---------- sharing ----------
@@ -159,6 +159,7 @@ export function shareList(list, emails, permission, inviter) {
   b.update(listRef(list.id), ...args);
   // the people already on it hear who joined (the new people get their own "shared with you")
   notify(b, list, inviter, 'member-added', { detail: emails.join(', '), skip: emails });
+  emails.forEach((to) => pushLater(b, 'invites', inviteRef(list.id, to).id));
   emails.forEach((to) =>
     b.set(inviteRef(list.id, to), {
       to,
@@ -171,7 +172,7 @@ export function shareList(list, emails, permission, inviter) {
       createdAt: serverTimestamp(),
     }),
   );
-  return b.commit();
+  return send(b);
 }
 
 // The owner changing someone's access: they're told
@@ -179,7 +180,7 @@ export function changeAccess(list, user, email, permission) {
   const b = writeBatch(db());
   b.update(listRef(list.id), roleField(email), permission);
   notify(b, list, user, 'access-changed', { detail: permission, only: [email] });
-  return b.commit();
+  return send(b);
 }
 
 // The owner removing someone. Clears their "shared with you"; they're told, and so is everyone else.
@@ -189,7 +190,7 @@ export function removeAccess(list, user, email) {
   b.delete(inviteRef(list.id, email));
   notify(b, list, user, 'access-removed', { only: [email] });
   notify(b, list, user, 'member-removed', { detail: email, skip: [email] });
-  return b.commit();
+  return send(b);
 }
 
 // A member removing themselves. The owner sees they left until sharing with them again.
@@ -199,7 +200,7 @@ export function leaveList(list, user) {
   b.update(listRef(list.id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email), 'leftEmails', arrayUnion(email));
   b.delete(inviteRef(list.id, email));
   notify(b, list, user, 'member-left');
-  return b.commit();
+  return send(b);
 }
 
 // The owner clearing someone from the "left the list" section without re-sharing
@@ -263,7 +264,7 @@ export function addTask(list, user, text, due = null, notes = '', time = null) {
   });
   b.update(listRef(listId), { updatedAt: serverTimestamp() });
   notify(b, list, user, 'task-add', { text, detail: due || '' });
-  return b.commit();
+  return send(b);
 }
 
 // What a change to a task was, for the notification
@@ -288,7 +289,7 @@ export function updateTask(list, task, user, patch, kind = taskKind(task, patch)
       detail: detail || (kind === 'task-edit' ? task.text : kind === 'task-due' ? (due && patch.start ? `${due} ${patch.start}` : due) : ''),
     });
   }
-  return b.commit();
+  return send(b);
 }
 
 // links: { url, title } (see lib/links.js). Union/remove, so two people adding at once don't overwrite each other
@@ -302,7 +303,7 @@ export function deleteTask(list, task, user) {
   b.delete(doc(tasksCol(list.id), task.id));
   b.update(listRef(list.id), { updatedAt: serverTimestamp() });
   notify(b, list, user, 'task-delete', { text: task.text });
-  return b.commit();
+  return send(b);
 }
 
 // ---------- comments ----------
@@ -322,7 +323,7 @@ export function addComment(list, user, text) {
     createdAt: serverTimestamp(),
   });
   notify(b, list, user, 'comment', { text });
-  return b.commit();
+  return send(b);
 }
 
 // Only the person who wrote it can change it; it's marked as edited
@@ -330,14 +331,14 @@ export function editComment(list, id, user, text) {
   const b = writeBatch(db());
   b.update(doc(commentsCol(list.id), id), { text, editedAt: serverTimestamp() });
   notify(b, list, user, 'comment-edit', { text });
-  return b.commit();
+  return send(b);
 }
 
 export function deleteComment(list, comment, user) {
   const b = writeBatch(db());
   b.delete(doc(commentsCol(list.id), comment.id));
   notify(b, list, user, 'comment-delete', { text: comment.text });
-  return b.commit();
+  return send(b);
 }
 
 // ---------- activity: "X did something on a list you share" notifications ----------
@@ -359,7 +360,9 @@ function notify(batch, list, user, kind, { text = '', detail = '', only = null, 
   const members = kind.startsWith('comment') ? Object.keys(roles).filter((e) => canSeeComments(roles[e])) : Object.keys(roles);
   const to = (only || [list.ownerEmail, ...members]).filter((e) => e && e !== me && !skip.includes(e));
   for (const email of new Set(to)) {
-    batch.set(doc(collection(db(), 'activity')), {
+    const ref = doc(collection(db(), 'activity'));
+    pushLater(batch, 'activity', ref.id);
+    batch.set(ref, {
       to: email,
       listId: list.id,
       listTitle: (list.title || '').slice(0, 120),
@@ -374,6 +377,44 @@ function notify(batch, list, user, kind, { text = '', detail = '', only = null, 
     });
   }
 }
+
+// ---------- device notifications (push) ----------
+// After a batch that wrote notifications is saved, /api/push sends them to the devices of the people
+// they're for. Fire and forget: a push that fails never undoes or holds up the change itself.
+const toPush = new WeakMap(); // batch → { activity: [ids], invites: [ids] }
+
+function pushLater(batch, kind, id) {
+  const p = toPush.get(batch) || { activity: [], invites: [] };
+  p[kind].push(id);
+  toPush.set(batch, p);
+}
+
+async function send(batch) {
+  await batch.commit();
+  const p = toPush.get(batch);
+  const me = fb().auth.currentUser;
+  if (!p || !me || (!p.activity.length && !p.invites.length)) return;
+  me.getIdToken()
+    .then((token) => fetch('/api/push', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+      body: JSON.stringify(p),
+      keepalive: true, // still goes if the page is closed right after
+    }))
+    .catch(() => {});
+}
+
+// This device's push token, so /api/push can reach it. Only the server reads these.
+export const savePushToken = (user, token, device) =>
+  setDoc(doc(db(), 'pushTokens', token), {
+    uid: user.uid,
+    email: emailOf(user),
+    device: String(device || '').slice(0, 200),
+    createdAt: serverTimestamp(),
+    updatedAt: serverTimestamp(),
+  });
+
+export const removePushToken = (token) => writeBatch(db()).delete(doc(db(), 'pushTokens', token)).commit();
 
 export function watchActivity(email, onData, onError) {
   return onSnapshot(query(collection(db(), 'activity'), where('to', '==', email)), (s) => onData(withId(s)), onError);
