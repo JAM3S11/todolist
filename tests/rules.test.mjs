@@ -444,3 +444,28 @@ describe('activity notifications', () => {
     await assertSucceeds(b.commit());
   });
 });
+
+describe('device notification tokens', () => {
+  const tok = (who, extra = {}) => ({
+    uid: people[who].uid, email: people[who].email, device: 'Chrome on Windows',
+    createdAt: serverTimestamp(), updatedAt: serverTimestamp(), ...extra,
+  });
+  test('you can save and remove this device\'s token', async () => {
+    await assertSucceeds(setDoc(doc(as('reader'), 'pushTokens', 'tokenA'), tok('reader')));
+    await assertSucceeds(deleteDoc(doc(as('reader'), 'pushTokens', 'tokenA')));
+  });
+  test('you cannot save a token in someone else\'s name', async () => {
+    await assertFails(setDoc(doc(as('reader'), 'pushTokens', 'tokenB'), tok('reader', { email: 'owner@test.com' })));
+    await assertFails(setDoc(doc(as('reader'), 'pushTokens', 'tokenB'), tok('reader', { uid: 'owner' })));
+    await assertFails(setDoc(doc(as('reader'), 'pushTokens', 'tokenB'), tok('reader', { extra: 1 })));
+  });
+  test('nobody can read tokens from the app, not even their own', async () => {
+    await setDoc(doc(as('reader'), 'pushTokens', 'tokenC'), tok('reader'));
+    await assertFails(getDoc(doc(as('reader'), 'pushTokens', 'tokenC')));
+    await assertFails(getDocs(collection(as('owner'), 'pushTokens')));
+  });
+  test('you cannot remove someone else\'s token', async () => {
+    await setDoc(doc(as('reader'), 'pushTokens', 'tokenD'), tok('reader'));
+    await assertFails(deleteDoc(doc(as('owner'), 'pushTokens', 'tokenD')));
+  });
+});

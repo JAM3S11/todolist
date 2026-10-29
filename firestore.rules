@@ -21,6 +21,7 @@ rules_version = '2';
 //    lists/{listId}/comments/{commentId}
 //    invites/{listId_email}              in-app "shared with you" notification for one person
 //    activity/{id}                       in-app "X did something on a list you share" notification for one person
+//    pushTokens/{token}                  a device that turned on device notifications (read only by the server)
 //    mail/{id}                           optional invitation emails (Trigger Email extension)
 // =====================================================================
 
@@ -324,6 +325,23 @@ service cloud.firestore {
         && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen'])
         && request.resource.data.seen is bool;
       allow delete: if hasEmail() && resource.data.to == myEmail();
+    }
+
+    // ---------- device notifications: one push token per device that turned them on ----------
+    // The id is the token itself. Only the server (/api/push, admin SDK) reads them, so the
+    // browser can only save or remove its own, never list anyone's.
+    match /pushTokens/{token} {
+      function validToken(d) {
+        return d.keys().hasOnly(['uid', 'email', 'device', 'createdAt', 'updatedAt'])
+          && d.uid == request.auth.uid && d.email == myEmail()
+          && d.device is string && d.device.size() <= 200
+          && token.size() <= 4096;
+      }
+      allow read: if false;
+      allow create: if hasEmail() && validToken(request.resource.data);
+      // the same device signing in as someone else takes the token over
+      allow update: if hasEmail() && validToken(request.resource.data);
+      allow delete: if signedIn() && (resource == null || resource.data.uid == request.auth.uid);
     }
 
     // ---------- optional: invitation emails ----------

@@ -4,8 +4,10 @@ import { dismissActivity, dismissInvite, markActivitySeen, markInviteSeen } from
 import { addDays, dueLabel, fromKey, timeRange, todayKey } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
 import { roleLabel } from '@/lib/permissions';
+import { ACT, isComment, toastText, who } from '@/lib/activityText';
 import { Avatar, colorFor, toDate } from '@/lib/people';
 import { useToast } from './Toast';
+import DevicePush, { PushPrompt } from './DevicePush';
 
 const OVERDUE_DAYS = 30; // older overdue tasks stop showing up as reminders
 const PANEL_MAX = 8;
@@ -127,51 +129,11 @@ const KIND = {
   overdue: { label: 'Overdue', cta: 'Open task' },
 };
 
-// Activity on a list or letter: its tag, and what the person did (read as "<who> <did> “<list>”").
-// text: the task or comment it's about; detail: the extra bit (old name, a date, someone's email, an access level).
-// gone: still shown after the list is gone (that's what it's telling you)
-const quote = (t) => `“${t}”`;
-const dueText = (d) => { const [day, time] = d.split(' '); return `${dueLabel(day).toLowerCase()}${time ? ` at ${time}` : ''}`; };
-const ACT = {
-  comment: { label: 'New comment', group: 'comments', did: () => 'commented on' },
-  'comment-edit': { label: 'Comment edited', group: 'comments', did: () => 'edited a comment on' },
-  'comment-delete': { label: 'Comment deleted', group: 'comments', did: () => 'deleted a comment on' },
-  'task-add': { label: 'Task added', did: (n) => `added ${quote(n.text)}${n.detail ? `, due ${dueText(n.detail)},` : ''} to` },
-  'task-edit': { label: 'Task changed', did: (n) => `renamed ${quote(n.detail)} to ${quote(n.text)} in` },
-  'task-done': { label: 'Task done', did: (n) => `completed ${quote(n.text)} in` },
-  'task-undone': { label: 'Task reopened', did: (n) => `reopened ${quote(n.text)} in` },
-  'task-due': { label: 'Date changed', did: (n) => (n.detail ? `set ${quote(n.text)} for ${dueText(n.detail)} in` : `removed the date from ${quote(n.text)} in`) },
-  'task-notes': { label: 'Notes changed', did: (n) => `updated the notes on ${quote(n.text)} in` },
-  'task-archive': { label: 'Task archived', did: (n) => `archived ${quote(n.text)} in` },
-  'task-restore': { label: 'Task restored', did: (n) => `restored ${quote(n.text)} in` },
-  'task-delete': { label: 'Task deleted', did: (n) => `deleted ${quote(n.text)} from` },
-  'task-link': { label: 'Link added', did: (n) => `added a link to ${quote(n.text)} in` },
-  'task-unlink': { label: 'Link removed', did: (n) => `removed a link from ${quote(n.text)} in` },
-  'letter-edit': { label: 'Letter edited', did: () => 'wrote in' },
-  'list-rename': { label: 'Renamed', did: (n) => `renamed ${quote(n.detail)} to` },
-  'list-archive': { label: 'Archived', did: () => 'archived' },
-  'list-unarchive': { label: 'Unarchived', did: () => 'unarchived' },
-  'list-delete': { label: 'Deleted', gone: true, did: () => 'deleted' },
-  'member-added': { label: 'New member', did: (n) => `gave ${n.detail} access to` },
-  'member-removed': { label: 'Member removed', did: (n) => `removed ${n.detail} from` },
-  'access-changed': { label: 'Your access', did: (n) => `changed your access to ${roleLabel(n.detail).toLowerCase()} on` },
-  'access-removed': { label: 'Access removed', gone: true, did: () => 'removed you from' },
-  'member-left': { label: 'Member left', did: () => 'left' },
-};
-const isComment = (n) => ACT[n.kind]?.group === 'comments';
 const isUpdate = (n) => !!ACT[n.kind] && !isComment(n);
 const REMINDER = new Set(['due', 'overdue']);
-const who = (n) => n.from.displayName || n.from.email;
-const where = (n) => (n.letter ? `the love letter “${n.listTitle}”` : `“${n.listTitle}”`);
-const short = (t) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
 const labelOf = (n) => (ACT[n.kind] || KIND[n.kind]).label;
 const ctaOf = (n) =>
   n.gone ? null : isComment(n) ? 'Open comments' : ACT[n.kind] || n.kind === 'share' ? (n.letter ? 'Open letter' : 'Open list') : KIND[n.kind].cta;
-
-function toastText(n) {
-  if (n.kind === 'share') return `${who(n)} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`;
-  return `${who(n)} ${ACT[n.kind].did(n)} ${where(n)}${n.kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}`;
-}
 
 function Headline({ n }) {
   if (n.kind === 'share') {
@@ -271,7 +233,7 @@ function RowActions({ n, api }) {
 // ---------------------------------------------------------------------------
 // The bell and its drop-down panel
 // ---------------------------------------------------------------------------
-export default function Notifications({ api, onOpen, onViewAll }) {
+export default function Notifications({ api, user, onOpen, onViewAll }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState('all');
   const box = useRef(null);
@@ -348,6 +310,7 @@ export default function Notifications({ api, onOpen, onViewAll }) {
             )}
           </div>
 
+          <PushPrompt user={user} />
           <button type="button" className="np-f" onClick={() => { setOpen(false); onViewAll(); }}>
             View all notifications
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -388,7 +351,7 @@ const FILTERS = {
   reminders: { label: 'Reminders', test: (n) => REMINDER.has(n.kind) },
 };
 
-export function NotificationsPage({ api, onOpen }) {
+export function NotificationsPage({ api, user, onOpen }) {
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
   const { items, unread } = api;
@@ -412,6 +375,7 @@ export function NotificationsPage({ api, onOpen }) {
           <div className="meta">{unread ? `${unread} unread` : 'All caught up'} · shares, changes, comments and task reminders</div>
         </div>
         <div className="bar-right">
+          <DevicePush user={user} />
           <button className="btn" type="button" onClick={api.markAllRead} disabled={!unread}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 7 17l-5-5M22 10l-7.5 7.5L13 16" /></svg>
             <span className="ntp-mark-l">Mark all as read</span><span className="ntp-mark-s">Read all</span>
