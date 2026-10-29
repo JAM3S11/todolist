@@ -8,6 +8,27 @@ import { useToast } from './Toast';
 
 const same = (a, b) => a.type === b.type && a.id === b.id;
 
+// When a song was added, the way Spotify's lists say it: '5 minutes ago', '3 days ago', then 'Oct 2, 2026'
+function addedAgo(at) {
+  if (!at) return '';
+  const s = (Date.now() - at) / 1000;
+  const ago = (n, unit) => `${n} ${unit}${n === 1 ? '' : 's'} ago`;
+  if (s < 60) return 'Just now';
+  if (s < 3600) return ago(Math.floor(s / 60), 'minute');
+  if (s < 86400) return ago(Math.floor(s / 3600), 'hour');
+  if (s < 30 * 86400) return ago(Math.floor(s / 86400), 'day');
+  return new Date(at).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+const Clock = () => (
+  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-label="Length">
+    <circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" strokeLinecap="round" />
+  </svg>
+);
+const PlayIcon = () => (
+  <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15L19.5 12z" /></svg>
+);
+
 // The Music page: find songs by name, keep them here, and play them in the sidebar player.
 // music: my saved songs, newest first. nowPlaying: the link in the sidebar player ('' = none).
 export default function Music({ user, music, nowPlaying }) {
@@ -82,7 +103,7 @@ export default function Music({ user, music, nowPlaying }) {
       title: info.ok || !match ? info.title : song.title,
       image: info.image || (match ? song.image : ''),
       addedAt: Date.now(),
-      ...(match && { artist: song.artist }),
+      ...(match && { artist: song.artist, album: song.album, ms: song.ms }),
     };
     setLink('');
     setPending(null);
@@ -164,18 +185,27 @@ export default function Music({ user, music, nowPlaying }) {
               : (
                 <>
                   <p className="music-hint">Pick the one you mean. Spotify opens on that song so you can copy its link.</p>
+                  <div className="trk hit trk-head" aria-hidden="true">
+                    <span className="trk-n">#</span><span>Title</span><span className="trk-al">Album</span>
+                    <span className="trk-len"><Clock /></span><span />
+                  </div>
                   <ul className="music-list">
                     {results.map((s, i) => (
                       <li key={s.key}>
-                        <button type="button" className={i === active ? 'music-hit on' : 'music-hit'} onClick={() => pick(s)}
+                        <button type="button" className={i === active ? 'trk hit on' : 'trk hit'} onClick={() => pick(s)}
                           onMouseEnter={() => setActive(i)}>
-                          {s.image
-                            ? <img className="music-cover" src={s.image} alt="" width="48" height="48" loading="lazy" />
-                            : <span className="music-cover blank" aria-hidden="true">♪</span>}
-                          <span className="music-t">
-                            <b>{s.title}{s.explicit && <span className="music-e" title="Explicit">E</span>}</b>
-                            <span>{[s.artist, s.album, s.year, songLength(s.ms)].filter(Boolean).join(' · ')}</span>
+                          <span className="trk-n"><span className="trk-i">{i + 1}</span><span className="trk-pi"><PlayIcon /></span></span>
+                          <span className="trk-t">
+                            {s.image
+                              ? <img className="music-cover" src={s.image} alt="" width="40" height="40" loading="lazy" />
+                              : <span className="music-cover blank" aria-hidden="true">♪</span>}
+                            <span className="trk-tt">
+                              <b>{s.title}</b>
+                              <span>{s.explicit && <span className="music-e" title="Explicit">E</span>}{s.artist}</span>
+                            </span>
                           </span>
+                          <span className="trk-al">{[s.album, s.year].filter(Boolean).join(' · ')}</span>
+                          <span className="trk-len">{songLength(s.ms)}</span>
                           <span className="music-go" aria-hidden="true">Add ↗</span>
                         </button>
                       </li>
@@ -229,24 +259,44 @@ export default function Music({ user, music, nowPlaying }) {
         ) : shown.length === 0 ? (
           <p className="muted">Nothing matches “{filter}”.</p>
         ) : (
-          <ul className="music-list">
-            {shown.map((m) => {
-              const on = !!playing && same(m, playing);
-              return (
-                <li key={`${m.type}:${m.id}`} className={on ? 'music-item on' : 'music-item'}>
-                  {m.image
-                    ? <img className="music-cover" src={m.image} alt="" width="48" height="48" loading="lazy" />
-                    : <span className="music-cover blank" aria-hidden="true">♪</span>}
-                  <div className="music-t">
-                    <b>{m.title}</b>
-                    <span>{[kindOf(m.type), m.artist].filter(Boolean).join(' · ')}{on && ' · Playing'}</span>
-                  </div>
-                  <button className="btn" type="button" onClick={() => play(m)} disabled={on}>{on ? 'Playing' : 'Play'}</button>
-                  <button className="nt-act" type="button" onClick={() => remove(m)} aria-label={`Remove ${m.title}`} title="Remove">✕</button>
-                </li>
-              );
-            })}
-          </ul>
+          <>
+            {/* laid out like a Spotify track list: # · Title (artist under it) · Album · Date added · length */}
+            <div className="trk trk-head" aria-hidden="true">
+              <span className="trk-n">#</span><span>Title</span><span className="trk-al">Album</span>
+              <span className="trk-d">Date added</span><span className="trk-len"><Clock /></span><span />
+            </div>
+            <ul className="music-list">
+              {shown.map((m) => {
+                const on = !!playing && same(m, playing);
+                const playMe = () => { if (!on) play(m); };
+                return (
+                  // a click anywhere on the row plays it (the title is the keyboard way)
+                  <li key={`${m.type}:${m.id}`} className={on ? 'trk on' : 'trk'} onClick={playMe}>
+                    <span className="trk-n">
+                      {on
+                        ? <span className="music-eq" aria-hidden="true"><i /><i /><i /></span>
+                        : <><span className="trk-i">{music.indexOf(m) + 1}</span><span className="trk-pi"><PlayIcon /></span></>}
+                    </span>
+                    <button type="button" className="trk-t" onClick={(e) => { e.stopPropagation(); playMe(); }}
+                      aria-label={on ? `${m.title}, playing now` : `Play ${m.title}`} aria-current={on || undefined}>
+                      {m.image
+                        ? <img className="music-cover" src={m.image} alt="" width="40" height="40" loading="lazy" />
+                        : <span className="music-cover blank" aria-hidden="true">♪</span>}
+                      <span className="trk-tt">
+                        <b>{m.title}</b>
+                        <span>{m.artist || kindOf(m.type)}</span>
+                      </span>
+                    </button>
+                    <span className="trk-al">{m.album || (m.type === 'track' ? '' : kindOf(m.type))}</span>
+                    <span className="trk-d">{addedAgo(m.addedAt)}</span>
+                    <span className="trk-len">{songLength(m.ms)}</span>
+                    <button className="trk-x" type="button" onClick={(e) => { e.stopPropagation(); remove(m); }}
+                      aria-label={`Remove ${m.title}`} title="Remove">✕</button>
+                  </li>
+                );
+              })}
+            </ul>
+          </>
         )}
       </section>
     </div>
