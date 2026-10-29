@@ -12,6 +12,8 @@ A to-do list app where you can share any list with other people and choose what 
 
 Everything is saved to **Firebase** the moment it happens. When you sign in on any device, the app reopens the list you were last on, with every task and comment as you left it. Changes from other people appear live. A copy is also kept in your browser, so the app opens instantly and keeps working offline; changes sync when you're back online.
 
+A **Spotify player** sits in the sidebar and keeps playing while you move around the app. On the **Music** page you search Spotify, paste the song, album or playlist link, and it is kept there for next time. Your music and what's playing are saved on your profile, so they follow you to every device. People signed in to Spotify in that browser hear full songs; everyone else gets 30-second previews.
+
 Stack: **Next.js 15** (React 19), **Firebase Authentication** (email/password and Google) and **Cloud Firestore** (database, live updates, offline cache).
 
 ---
@@ -184,7 +186,9 @@ Every action is saved straight away. Firestore shows the change on screen at onc
 
 ```
 users/{uid}
-  email, displayName, lastListId, updatedAt
+  email, displayName, lastListId, favorites, listOrder, updatedAt
+  spotify   what the sidebar player is playing
+  music     [ { type, id, title, image, addedAt } ]   ← songs kept on the Music page (up to 100)
 
 lists/{listId}
   title, ownerId, ownerEmail, ownerName, createdAt, updatedAt
@@ -221,6 +225,8 @@ src/app/globals.css          All styling (light and dark mode)
 src/components/
   Login.js                   Email/password, Google, forgot password
   Workspace.js               Sidebar, restores your last list, notification bell, leaving a list
+  Music.js                   Music page: search Spotify, keep songs, play them
+  MusicPlayer.js             Spotify player in the sidebar
   Notifications.js           Bell with "X shared a list with you"; click one to open the list
   ListView.js                Tasks, live updates, role-based buttons
   TaskItem.js                One task: tick, edit, archive, delete
@@ -241,7 +247,7 @@ src/lib/
 
 `tests/rules.test.mjs` checks every access level against `firestore.rules` using Firebase's local emulator. Examples: a reader can't edit, a writer can't comment, a member can't raise their own access, a stranger sees nothing.
 
-1. Install **Java 11 or newer** (for example "Microsoft Build of OpenJDK" or Temurin from https://adoptium.net). Check with `java -version`.
+1. Install **Java 21 or newer** (for example Temurin from https://adoptium.net, or `winget install EclipseAdoptium.Temurin.21.JDK`). Check with `java -version`.
 2. Run:
    ```bash
    npm run test:rules
