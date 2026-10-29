@@ -21,6 +21,7 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
   const toast = useToast();
   const [pop, setPop] = useState(false); // rail: player open beside the icon
   const [noApi, setNoApi] = useState(false); // Spotify's player controls didn't load: plain player, no auto-next
+  const [paused, setPaused] = useState(true);
   // Compact player and repeat, remembered on this device
   const [small, setSmall] = useState(() => {
     try { return localStorage.getItem('music') === 'small'; } catch { return false; }
@@ -64,7 +65,7 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
   const fail = (e) => toast(`Not saved: ${friendlyError(e)}`, 'err');
   const playItem = (item) => { askToPlay(); saveSpotify(user.uid, spotifyLink(item)).catch(fail); };
   const openMusic = () => { setPop(false); onOpenMusic(); };
-  const remove = () => saveSpotify(user.uid, '').then(() => toast('Spotify player removed')).catch(fail);
+  const remove = () => saveSpotify(user.uid, '').then(() => toast('Player closed')).catch(fail);
 
   // ⏭: the next one in My music (round to the first). auto: the song just ended, so stop after the last one.
   function next(auto = false) {
@@ -88,6 +89,7 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
     if (d.playingURI && d.playingURI !== loaded.current) return; // a late report about the song before
     const was = last.current;
     last.current = d;
+    setPaused(d.isPaused);
     if (!single(embed)) return;
     if (d.position < d.duration - 3000) ended.current = false;
     // at the end, or stopped / jumped back right before it
@@ -145,6 +147,8 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
 
   if (link === null) return null;
   const canMove = music.length > 1 || (music.length === 1 && at === -1);
+  // what ⏭ (or the end of this song) plays next, said under the controls
+  const upNext = !single(embed) ? null : at === -1 ? music[0] : music[at + 1];
 
   return (
     <section ref={box} className={['music', pop && 'pop', embed && 'on'].filter(Boolean).join(' ')} aria-label="Music player">
@@ -155,6 +159,26 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
       <div className="music-panel">
         {embed ? (
           <>
+            <div className="music-head">
+              <span className={paused && !noApi ? 'music-eq still' : 'music-eq'} aria-hidden="true"><i /><i /><i /></span>
+              <span className="music-lbl">
+                {paused && !noApi ? 'Paused' : 'Now playing'}{at >= 0 && <span className="music-pos"> · {at + 1} of {music.length}</span>}
+              </span>
+              <button type="button" className="music-ic sm" onClick={openMusic} aria-label="My music" title="My music">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true">
+                  <path d="M4 6h11M4 12h11M4 18h7" /><circle cx="18" cy="17" r="2.5" /><path d="M20.5 17V7l-3 1" />
+                </svg>
+              </button>
+              <button type="button" className="music-ic sm" onClick={toggleSmall} aria-label={small ? 'Bigger player' : 'Smaller player'}
+                title={small ? 'Bigger player' : 'Smaller player'}>
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  {small ? <path d="M6 15l6-6 6 6" /> : <path d="M6 9l6 6 6-6" />}
+                </svg>
+              </button>
+              <button type="button" className="music-ic sm" onClick={remove} aria-label="Close the player" title="Close the player">
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+              </button>
+            </div>
             {noApi ? (
               <iframe className="music-frame" src={embed.embedUrl} height={small ? 80 : 152} loading="lazy" title="Spotify player"
                 allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" />
@@ -164,31 +188,49 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
             <div className="music-ctl">
               <button type="button" className="music-ic" onClick={prev} disabled={!canMove && !ctl.current}
                 aria-label="Previous song" title="Previous song">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z" /></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z" /></svg>
               </button>
               <button type="button" className="music-ic" onClick={() => next()} disabled={!canMove}
                 aria-label="Next song" title="Next song">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z" /></svg>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z" /></svg>
               </button>
               <button type="button" className={repeat ? 'music-ic on' : 'music-ic'} onClick={toggleRepeat} aria-pressed={repeat}
                 disabled={noApi} aria-label="Repeat this song" title={repeat ? 'Repeating this song' : 'Repeat this song'}>
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
                   <path d="M17 2l4 4-4 4" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a3 3 0 0 1-3 3H3" />
                   {repeat && <text x="12" y="14.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="currentColor" stroke="none">1</text>}
                 </svg>
               </button>
-              {at >= 0 && <span className="music-pos">{at + 1} / {music.length}</span>}
             </div>
-            <div className="music-bar">
-              <button type="button" className="music-act" onClick={toggleSmall}>{small ? 'Bigger' : 'Smaller'}</button>
-              <button type="button" className="music-act" onClick={openMusic}>My music</button>
-              <button type="button" className="music-act" onClick={remove}>Remove</button>
-            </div>
+            {single(embed) && !noApi && (
+              repeat ? <p className="music-next">Repeating this song</p>
+                : upNext ? (
+                  <button type="button" className="music-next" onClick={() => next()} title="Play it now">
+                    Up next: <b>{[upNext.title, upNext.artist].filter(Boolean).join(' · ')}</b>
+                  </button>
+                )
+                : music.length > 0 && <p className="music-next">Last song in My music</p>
+            )}
           </>
         ) : (
-          <button type="button" className="music-add" onClick={openMusic}>
-            {icon}<span>Play Spotify</span>
-          </button>
+          <div className="music-empty">
+            <div className="music-empty-h">
+              <span className="music-badge" aria-hidden="true">{icon}</span>
+              <span>
+                <b>Music while you work</b>
+                <span className="music-hint">{music.length ? `${music.length} song${music.length === 1 ? '' : 's'} in My music` : 'Find songs to play here'}</span>
+              </span>
+            </div>
+            {music.length > 0 && (
+              <button type="button" className="btn primary music-go-btn" onClick={() => playItem(music[0])}>
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7 4.5v15L19.5 12z" /></svg>
+                Play my music
+              </button>
+            )}
+            <button type="button" className={music.length ? 'music-link' : 'btn primary music-go-btn'} onClick={openMusic}>
+              {music.length ? 'Find more songs' : 'Find a song'}
+            </button>
+          </div>
         )}
       </div>
     </section>

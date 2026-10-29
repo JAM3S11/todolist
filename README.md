@@ -188,7 +188,7 @@ Every action is saved straight away. Firestore shows the change on screen at onc
 users/{uid}
   email, displayName, lastListId, favorites, listOrder, updatedAt
   spotify   what the sidebar player is playing
-  music     [ { type, id, title, artist, image, addedAt } ]   ← songs kept on the Music page (up to 100)
+  music     [ { type, id, title, artist, album, ms, image, addedAt } ]   ← songs kept on the Music page (up to 100)
 
 lists/{listId}
   title, ownerId, ownerEmail, ownerName, createdAt, updatedAt
