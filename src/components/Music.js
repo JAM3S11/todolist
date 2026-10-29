@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
-import { saveMusic, saveSpotify } from '@/lib/data';
+import { addSong, playSong, removeSong } from '@/lib/data';
 import { sameSong, searchSongs, songLength } from '@/lib/musicSearch';
 import { MAX_MUSIC, MAX_SPOTIFY, askToPlay, kindOf, spotifyEmbed, spotifyInfo, spotifyLink, spotifySearchUrl } from '@/lib/spotify';
 import { useToast } from './Toast';
@@ -49,7 +49,8 @@ export default function Music({ user, music, nowPlaying }) {
   const playing = nowPlaying ? spotifyEmbed(nowPlaying) : null;
   const playingItem = playing && music.find((m) => same(m, playing));
   const fail = (e) => toast(`Not saved: ${friendlyError(e)}`, 'err');
-  const play = (item) => { askToPlay(); saveSpotify(user.uid, spotifyLink(item)).catch(fail); };
+  // each of these is also noted in my activity (Notifications)
+  const play = (item) => { askToPlay(); playSong(user, item, spotifyLink(item), 'pick').catch(fail); };
 
   // ---- matching songs as I type (Apple's free catalogue), a moment after I stop typing
   useEffect(() => {
@@ -107,7 +108,7 @@ export default function Music({ user, music, nowPlaying }) {
     };
     setLink('');
     setPending(null);
-    saveMusic(user.uid, [item, ...music]).then(() => toast(`“${item.title}” added to your music`)).catch(fail);
+    addSong(user, music, item).then(() => toast(`“${item.title}” added to your music`)).catch(fail);
     play(item);
   }
 
@@ -146,7 +147,7 @@ export default function Music({ user, music, nowPlaying }) {
   }
 
   const remove = (item) =>
-    saveMusic(user.uid, music.filter((m) => !same(m, item))).then(() => toast(`“${item.title}” removed`)).catch(fail);
+    removeSong(user, music, item, same).then(() => toast(`“${item.title}” removed`)).catch(fail);
 
   const shown = useMemo(() => {
     const f = filter.trim().toLowerCase();

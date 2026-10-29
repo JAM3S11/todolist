@@ -9,6 +9,7 @@ import {
   doc,
   getDoc,
   getDocs,
+  limit,
   onSnapshot,
   orderBy,
   query,
@@ -83,6 +84,38 @@ export function watchMusic(uid, onData) {
 export const saveMusic = (uid, items) =>
   setDoc(doc(db(), 'users', uid), { music: items.slice(0, 100), updatedAt: serverTimestamp() }, { merge: true });
 
+// The same changes, each also noted in my activity ("You added “Song” to My music")
+const songName = (item) => [item.title, item.artist].filter(Boolean).join(' · ');
+
+export function addSong(user, music, item) {
+  const b = writeBatch(db());
+  b.set(doc(db(), 'users', user.uid), { music: [item, ...music].slice(0, 100), updatedAt: serverTimestamp() }, { merge: true });
+  logSelf(b, user, 'music-add', { text: songName(item) });
+  return b.commit();
+}
+
+export function removeSong(user, music, item, same) {
+  const b = writeBatch(db());
+  b.set(doc(db(), 'users', user.uid), { music: music.filter((m) => !same(m, item)), updatedAt: serverTimestamp() }, { merge: true });
+  logSelf(b, user, 'music-remove', { text: songName(item) });
+  return b.commit();
+}
+
+// how: 'pick' (chose it), 'next', 'previous', or 'auto' (the song before ended)
+export function playSong(user, item, link, how = 'pick') {
+  const b = writeBatch(db());
+  b.set(doc(db(), 'users', user.uid), { spotify: link, updatedAt: serverTimestamp() }, { merge: true });
+  logSelf(b, user, 'music-play', { text: songName(item), detail: how });
+  return b.commit();
+}
+
+export function stopMusic(user) {
+  const b = writeBatch(db());
+  b.set(doc(db(), 'users', user.uid), { spotify: '', updatedAt: serverTimestamp() }, { merge: true });
+  logSelf(b, user, 'music-stop');
+  return b.commit();
+}
+
 // ---------- lists ----------
 const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
 
@@ -102,7 +135,9 @@ export function watchSharedLists(email, onData, onError) {
 
 // kind: 'list' (to-do) or 'letter' (a love letter: a written body, shared with one person at most)
 export async function createList(user, title, kind = 'list') {
-  const ref = await addDoc(collection(db(), 'lists'), {
+  const ref = doc(collection(db(), 'lists'));
+  const b = writeBatch(db());
+  b.set(ref, {
     title,
     kind,
     ...(kind === 'letter' ? { body: '' } : {}),
@@ -115,6 +150,8 @@ export async function createList(user, title, kind = 'list') {
     createdAt: serverTimestamp(),
     updatedAt: serverTimestamp(),
   });
+  logSelf(b, user, 'list-create', { list: { id: ref.id, title, kind } });
+  await b.commit();
   return ref.id;
 }
 
@@ -204,7 +241,7 @@ export function removeAccess(list, user, email) {
   const b = writeBatch(db());
   b.update(listRef(list.id), roleField(email), deleteField(), 'memberEmails', arrayRemove(email));
   b.delete(inviteRef(list.id, email));
-  notify(b, list, user, 'access-removed', { only: [email] });
+  notify(b, list, user, 'access-removed', { only: [email], log: false });
   notify(b, list, user, 'member-removed', { detail: email, skip: [email] });
   return send(b);
 }
@@ -370,8 +407,10 @@ const canSeeComments = (permission) => permission === 'comment' || permission ==
 
 // text: what it's about (a task, a comment); detail: the extra bit (old name, a date, someone's email)
 // only: just these people; skip: everyone except these
-function notify(batch, list, user, kind, { text = '', detail = '', only = null, skip = [] } = {}) {
+// log: also note it in my own activity (off for the second half of a two-part change)
+function notify(batch, list, user, kind, { text = '', detail = '', only = null, skip = [], log = true } = {}) {
   const me = emailOf(user);
+  if (log) logSelf(batch, user, kind, { text, detail, target: (only || []).join(', '), list });
   const roles = list.roles || {};
   const members = kind.startsWith('comment') ? Object.keys(roles).filter((e) => canSeeComments(roles[e])) : Object.keys(roles);
   const to = (only || [list.ownerEmail, ...members]).filter((e) => e && e !== me && !skip.includes(e));
@@ -393,6 +432,31 @@ function notify(batch, list, user, kind, { text = '', detail = '', only = null, 
     });
   }
 }
+
+// ---------- my own activity: users/{uid}/log/{id} ----------
+// "You created …", "You completed …", "You added a song …". Only I can see it; it shows in my
+// Notifications next to everyone else's activity. Saved in the same batch as the change itself.
+const logCol = (uid) => collection(db(), 'users', uid, 'log');
+
+function logSelf(batch, user, kind, { text = '', detail = '', target = '', list = null } = {}) {
+  batch.set(doc(logCol(user.uid)), {
+    kind,
+    text: String(text).slice(0, 200),
+    detail: String(detail).slice(0, 200),
+    target: String(target).slice(0, 200),
+    ...(list ? { listId: list.id, listTitle: (list.title || '').slice(0, 120), letter: list.kind === 'letter' } : {}),
+    seen: false,
+    createdAt: serverTimestamp(),
+  });
+}
+
+export function watchLog(uid, onData) {
+  return onSnapshot(query(logCol(uid), orderBy('createdAt', 'desc'), limit(300)), (s) => onData(withId(s)), () => onData([]));
+}
+
+export const markLogSeen = (uid, id, seen = true) => updateDoc(doc(logCol(uid), id), { seen });
+
+export const dismissLog = (uid, id) => writeBatch(db()).delete(doc(logCol(uid), id)).commit();
 
 // ---------- device notifications (push) ----------
 // After a batch that wrote notifications is saved, /api/push sends them to the devices of the people

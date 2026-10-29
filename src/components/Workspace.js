@@ -19,6 +19,7 @@ import {
   setFavorite,
   watchFavorites,
   watchActivity,
+  watchLog,
   watchInvites,
   watchListOrder,
   watchOwnedLists,
@@ -133,6 +134,11 @@ function WorkspaceInner({ user }) {
 
   // ---- live notifications: someone wrote, edited or deleted a comment on one of my lists or letters
   useEffect(() => watchActivity(email, setActivity, () => setActivity([])), [email]);
+
+  // ---- my own activity ("You created …", "You added a song …"), shown with the rest
+  const [log, setLog] = useState([]);
+  useEffect(() => watchLog(user.uid, setLog), [user.uid]);
+  const me = useMemo(() => ({ email, displayName: user.displayName }), [email, user.displayName]);
 
   // ---- my favourite lists (stored on my profile, so they follow me to any device)
   useEffect(() => watchFavorites(user.uid, setFavList), [user.uid]);
@@ -299,7 +305,7 @@ function WorkspaceInner({ user }) {
   const allTasks = useAllTasks(arranged);
   const dueNow = dueNowCount(taskEntries(openLists, allTasks));
   // Shares + due / overdue reminders, for the bell and the Notifications page
-  const notif = useNotifications({ invites, activity, lists, tasksByList: allTasks, uid: user.uid, openListId: view === 'list' ? activeId : null });
+  const notif = useNotifications({ invites, activity, log, me, lists, tasksByList: allTasks, uid: user.uid, openListId: view === 'list' ? activeId : null });
   const showNotifications = () => { setView('notifications'); setMenuOpen(false); };
   const mine = arranged.filter((l) => l.role === 'owner' && !l.archived);
   const others = arranged.filter((l) => l.role !== 'owner' && !l.archived);
@@ -310,6 +316,8 @@ function WorkspaceInner({ user }) {
   };
   const archived = todoLists.filter((l) => l.archived);
   const pick = (id) => { setActiveId(id); setView('list'); setMenuOpen(false); };
+  // a notification: its list, or (null) the Music page for music ones
+  const openNote = (id) => (id ? pick(id) : (setView('music'), setMenuOpen(false)));
   const group = { activeId: view === 'list' ? activeId : null, onPick: pick, favorites, actions };
 
   // Everyone I've shared with or who has shared with me: the contacts in the share window
@@ -331,7 +339,7 @@ function WorkspaceInner({ user }) {
             <span aria-hidden="true" />
           </button>
           <div className="brand"><Emblem size={28} /><span className="brand-name">Shared To-Do</span></div>
-          <Notifications api={notif} user={user} onOpen={pick} onViewAll={showNotifications} />
+          <Notifications api={notif} user={user} onOpen={openNote} onViewAll={showNotifications} />
           <button className="side-btn collapse only-desktop" type="button" onClick={toggleRail}
             aria-label={rail ? 'Expand sidebar' : 'Collapse sidebar'} title={rail ? 'Expand sidebar' : 'Collapse sidebar'}>
             <Icon name="sidebar" />
@@ -427,7 +435,7 @@ function WorkspaceInner({ user }) {
         {lists === null ? (
           <Loading variant="page" hint="Getting your lists ready" />
         ) : view === 'notifications' ? (
-          <NotificationsPage api={notif} user={user} onOpen={pick} />
+          <NotificationsPage api={notif} user={user} onOpen={openNote} />
         ) : view === 'calendar' ? (
           <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
         ) : view === 'music' ? (

@@ -485,3 +485,32 @@ describe('device notification tokens', () => {
     await assertFails(deleteDoc(doc(as('owner'), 'pushTokens', 'tokenD')));
   });
 });
+
+describe('my own activity log', () => {
+  const entry = (extra = {}) => ({ kind: 'music-add', text: 'Blinding Lights · The Weeknd', detail: '', target: '',
+    seen: false, createdAt: serverTimestamp(), ...extra });
+  const logOf = (who, uid = people[who].uid) => collection(as(who), 'users', uid, 'log');
+
+  test('I can note, read, mark and remove my own activity', async () => {
+    const ref = await addDoc(logOf('reader'), entry());
+    await assertSucceeds(getDocs(logOf('reader')));
+    await assertSucceeds(updateDoc(ref, { seen: true }));
+    await assertSucceeds(deleteDoc(ref));
+  });
+  test('with a list it is about', () =>
+    assertSucceeds(addDoc(logOf('owner'), entry({ kind: 'list-create', listId: LIST, listTitle: 'Moving house', letter: false }))));
+  test('nobody else can read or write my activity', async () => {
+    await assertFails(getDocs(logOf('owner', 'reader')));
+    await assertFails(addDoc(logOf('owner', 'reader'), entry()));
+  });
+  test('entries are checked', async () => {
+    await assertFails(addDoc(logOf('reader'), entry({ text: 'x'.repeat(201) })));
+    await assertFails(addDoc(logOf('reader'), entry({ seen: true })));
+    await assertFails(addDoc(logOf('reader'), entry({ hacked: 1 })));
+    await assertFails(addDoc(logOf('reader'), entry({ kind: '' })));
+  });
+  test('only "seen" can change afterwards', async () => {
+    const ref = await addDoc(logOf('reader'), entry());
+    await assertFails(updateDoc(ref, { text: 'changed' }));
+  });
+});
