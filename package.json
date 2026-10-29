@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "emulators": "firebase emulators:start --project demo-todo",
-    "test:rules": "firebase emulators:exec --only firestore --project demo-todo \"node --test tests/\"",
+    "test:rules": "firebase emulators:exec --only firestore --project demo-todo \"node --test tests/rules.test.mjs\"",
     "deploy:rules": "firebase deploy --only firestore:rules"
   },
   "dependencies": {

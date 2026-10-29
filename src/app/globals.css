@@ -200,6 +200,19 @@ input:not([type=checkbox]):not([type=radio]), textarea, select { border: 1px sol
 .li-mark { flex: none; display: grid; place-items: center; width: 20px; height: 20px; border-radius: 6px; color: #fff; font-size: 11px; font-weight: 700; line-height: 1; }
 .ll-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Spotify player, just above the account card */
+.music { flex: none; }
+.music-btn { display: none; }
+.music-panel { display: flex; flex-direction: column; gap: 4px; }
+.music-frame { display: block; width: 100%; border: 0; border-radius: 12px; background: var(--sunk); }
+.music-bar { display: flex; justify-content: flex-end; gap: 2px; }
+.music-act { padding: 2px 7px; border: none; border-radius: 6px; background: transparent; color: var(--muted); font-family: var(--mono); font-size: 11.5px; }
+.music-act:hover { background: var(--sunk); color: var(--fg); }
+.music-add { display: flex; align-items: center; gap: 10px; width: 100%; padding: 7px 10px; border: 1px dashed var(--line); border-radius: 8px;
+  background: transparent; color: var(--muted); font-size: 14px; text-align: left; }
+.music-add:hover { border-color: var(--accent); color: var(--fg); }
+.music-add .icon { color: var(--accent); }
+.music-hint { font-size: 12px; color: var(--muted); }
 .me { flex: none; display: flex; gap: 10px; align-items: center; padding: 10px 8px; border-radius: 10px; border: 1px solid var(--line); background: var(--sunk); }
 .me-txt { flex: 1; min-width: 0; }
 .me-name { font-size: 14px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -226,6 +239,13 @@ input:not([type=checkbox]):not([type=radio]), textarea, select { border: 1px sol
   .shell.rail :is(.new-list, .nav-i, .list-link) { justify-content: center; padding-left: 0; padding-right: 0; }
   .shell.rail .group + .group { padding-top: 12px; border-top: 1px solid var(--line); }
   .shell.rail .me { flex-direction: column; padding: 8px 0; }
+  /* rail: just the music icon; the player floats beside it (hidden, never removed, so the music keeps playing) */
+  .shell.rail .music { display: flex; justify-content: center; }
+  .shell.rail .music-btn { display: grid; }
+  .shell.rail .music.on .music-btn { color: var(--accent); }
+  .shell.rail .music-panel { position: fixed; z-index: 30; left: 76px; bottom: 12px; width: 320px; padding: 10px; border: 1px solid var(--line);
+    border-radius: 14px; background: var(--surface); box-shadow: 0 12px 40px rgb(0 0 0 / .5); visibility: hidden; }
+  .shell.rail .music.pop .music-panel { visibility: visible; }
 }
 @media (min-width: 861px) and (prefers-reduced-motion: no-preference) {
   .shell { transition: grid-template-columns .2s ease; }
@@ -272,6 +292,8 @@ input:not([type=checkbox]):not([type=radio]), textarea, select { border: 1px sol
   .side-body :is(.nav-i, .list-link) { padding-top: 10px; padding-bottom: 10px; font-size: 15px; } /* bigger tap targets */
   .side-body .li-mark { width: 24px; height: 24px; font-size: 12px; }
   .side-body .new-list { height: 44px; }
+  .side-body .music-add { padding-top: 10px; padding-bottom: 10px; font-size: 15px; }
+  .music .link-form input { font-size: 16px; } /* no zoom-in on iPhone */
   .side-body .sec-h { padding-top: 6px; padding-bottom: 6px; }
   /* account card: name on top, a full-width labelled Sign out button under it */
   .side-body .me { flex-wrap: wrap; row-gap: 10px; }
@@ -1283,6 +1305,46 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 
 /* the page of cards */
 .letters-wrap { max-width: 1080px; margin: 0 auto; width: 100%; }
+
+/* Music page: find songs on Spotify, keep them, play them in the sidebar player */
+.music-wrap { max-width: 760px; margin: 0 auto; width: 100%; }
+.music-sec { display: flex; flex-direction: column; gap: 10px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.music-h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
+.music-h2 .count { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted); }
+.music-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
+.music-filter { flex: 0 1 240px; }
+.music-row-f { display: flex; gap: 8px; }
+.music-row-f input { flex: 1; }
+.music-now { display: flex; align-items: center; gap: 8px; min-width: 0; color: var(--muted); font-size: 14px; }
+.music-now b { color: var(--fg); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-eq { flex: none; display: flex; align-items: flex-end; gap: 2px; height: 14px; }
+.music-eq i { width: 3px; height: 100%; border-radius: 1px; background: var(--accent); }
+.music-eq i:nth-child(2) { height: 60%; }
+.music-eq i:nth-child(3) { height: 80%; }
+@media (prefers-reduced-motion: no-preference) {
+  .music-eq i { animation: music-eq 1s ease-in-out infinite alternate; }
+  .music-eq i:nth-child(2) { animation-delay: -.4s; }
+  .music-eq i:nth-child(3) { animation-delay: -.7s; }
+}
+@keyframes music-eq { from { height: 25%; } to { height: 100%; } }
+.music-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.music-item { display: flex; align-items: center; gap: 12px; padding: 8px; border-radius: 10px; }
+.music-item:hover { background: var(--sunk); }
+.music-item.on { background: var(--accent-soft); }
+.music-cover { flex: none; width: 48px; height: 48px; border-radius: 8px; object-fit: cover; background: var(--sunk); }
+.music-cover.blank { display: grid; place-items: center; color: var(--muted); font-size: 20px; }
+.music-t { flex: 1; min-width: 0; display: flex; flex-direction: column; }
+.music-t b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.music-t span { font-family: var(--mono); font-size: 12px; color: var(--muted); }
+.music-item .btn { padding: 6px 14px; font-size: 13px; }
+.music-item.on .btn:disabled { opacity: 1; background: transparent; border-color: var(--accent); color: var(--accent); cursor: default; }
+@media (max-width: 560px) {
+  .music-sec { padding: 14px; }
+  .music-row-f { flex-direction: column; }
+  .music-row-f input, .music-filter { font-size: 16px; } /* no zoom-in on iPhone */
+  .music-filter { flex-basis: 100%; }
+  .music-item { gap: 10px; padding: 8px 4px; }
+}
 .letters-sec { display: flex; flex-direction: column; gap: 14px; }
 .letters-h { margin: 0; font-size: 15px; font-family: var(--mono); font-weight: 600; color: var(--muted); display: flex; gap: 8px; align-items: center; }
 .letters-h .count { font-size: 11px; padding: 1px 8px; border-radius: 999px; background: var(--sunk); }

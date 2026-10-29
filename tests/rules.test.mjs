@@ -1,5 +1,5 @@
 // Checks every access level against firestore.rules using the Firebase emulator.
-// Run with:  npm run test:rules   (needs Java 11+ installed)
+// Run with:  npm run test:rules   (needs Java 21+ installed)
 import { after, before, beforeEach, describe, test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { assertFails, assertSucceeds, initializeTestEnvironment } from '@firebase/rules-unit-testing';
@@ -254,6 +254,22 @@ describe('profiles and invitations', () => {
     assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { listOrder: [LIST, 'other'], updatedAt: serverTimestamp() }, { merge: true })));
   test('list order must be a list', () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { listOrder: 'nope' }, { merge: true })));
+  test('save your own Spotify player link', () =>
+    assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'),
+      { spotify: 'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M', updatedAt: serverTimestamp() }, { merge: true })));
+  test('Spotify link has a length limit', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { spotify: 'x'.repeat(201) }, { merge: true })));
+  test('save your own music', () =>
+    assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'),
+      { music: [{ type: 'track', id: '11dFghVXANMlKmJXsNCbNl', title: 'A song', image: '', addedAt: 1 }], updatedAt: serverTimestamp() }, { merge: true })));
+  test('music must be a list', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: 'nope' }, { merge: true })));
+  test('music keeps at most 100', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: Array.from({ length: 101 }, (_, i) => ({ id: String(i) })) }, { merge: true })));
+  test("cannot change someone else's music", () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'owner'), { music: [] }, { merge: true })));
+  test("cannot change someone else's Spotify link", () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'owner'), { spotify: 'https://open.spotify.com/album/x' }, { merge: true })));
   test("cannot change someone else's favourites", () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'owner'), { favorites: [LIST] }, { merge: true })));
   test('cannot read someone else\'s profile', () => assertFails(getDoc(doc(as('reader'), 'users', 'owner'))));

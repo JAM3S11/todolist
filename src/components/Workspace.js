@@ -23,6 +23,8 @@ import {
   watchListOrder,
   watchOwnedLists,
   watchSharedLists,
+  watchMusic,
+  watchSpotify,
 } from '@/lib/data';
 import { roleLabel } from '@/lib/permissions';
 import { disablePush, refreshPush } from '@/lib/push';
@@ -37,6 +39,8 @@ import ListView from './ListView';
 import Letters from './Letters';
 import LetterView from './LetterView';
 import Loading from './Loading';
+import Music from './Music';
+import MusicPlayer from './MusicPlayer';
 import { ToastProvider, useToast } from './Toast';
 
 export default function Workspace(props) {
@@ -50,7 +54,7 @@ export default function Workspace(props) {
 // Signing in lands on "My List" (the board), unless a shared link (?list=…) points at one list
 function initialView() {
   const q = new URLSearchParams(window.location.search);
-  if (['calendar', 'notifications', 'letters'].includes(q.get('view'))) return q.get('view');
+  if (['calendar', 'notifications', 'letters', 'music'].includes(q.get('view'))) return q.get('view');
   return q.get('view') === 'board' || !q.get('list') ? 'board' : 'list';
 }
 
@@ -139,6 +143,12 @@ function WorkspaceInner({ user }) {
   useEffect(() => watchListOrder(user.uid, setOrder), [user.uid]);
   const rank = useMemo(() => new Map(order.map((id, i) => [id, i])), [order]);
 
+  // ---- what the sidebar player is playing, and the songs I kept on the Music page (both on my profile)
+  const [nowPlaying, setNowPlaying] = useState(null); // null = loading, '' = nothing
+  useEffect(() => watchSpotify(user.uid, setNowPlaying), [user.uid]);
+  const [music, setMusic] = useState([]);
+  useEffect(() => watchMusic(user.uid, setMusic), [user.uid]);
+
   const lists = useMemo(() => {
     // wait for both, so "where I left off" can be a list someone shared with me
     if (owned === null || shared === null) return null;
@@ -194,7 +204,7 @@ function WorkspaceInner({ user }) {
   useEffect(() => {
     const url = new URL(window.location.href);
     if (activeId) url.searchParams.set('list', activeId);
-    if (['board', 'calendar', 'notifications', 'letters'].includes(view)) url.searchParams.set('view', view);
+    if (['board', 'calendar', 'notifications', 'letters', 'music'].includes(view)) url.searchParams.set('view', view);
     else url.searchParams.delete('view');
     window.history.replaceState(null, '', url);
     if (activeId) saveLastListId(user.uid, activeId).catch(() => {});
@@ -368,6 +378,12 @@ function WorkspaceInner({ user }) {
                 <Icon name="heart" /><span className="lbl">Love letters</span>
                 {letters.length > 0 && <span className="count">{letters.filter((l) => !l.archived).length}</span>}
               </button>
+              <button type="button" className={view === 'music' ? 'nav-i on' : 'nav-i'} title="Music"
+                aria-current={view === 'music' ? 'page' : undefined}
+                onClick={() => { setView('music'); setMenuOpen(false); }}>
+                <Icon name="music" /><span className="lbl">Music</span>
+                {music.length > 0 && <span className="count">{music.length}</span>}
+              </button>
               <button type="button" className={view === 'notifications' ? 'nav-i on' : 'nav-i'} title="Notifications"
                 aria-current={view === 'notifications' ? 'page' : undefined} onClick={showNotifications}>
                 <Icon name="bell" /><span className="lbl">Notifications</span>
@@ -391,6 +407,9 @@ function WorkspaceInner({ user }) {
             )}
           </div>
 
+          <MusicPlayer user={user} link={nowPlaying} onOpenMusic={() => { setView('music'); setMenuOpen(false); }}
+            icon={<Icon name="music" />} />
+
           <div className="me">
             <Avatar person={{ email, displayName: user.displayName }} size={32} />
             <div className="me-txt">
@@ -411,6 +430,8 @@ function WorkspaceInner({ user }) {
           <NotificationsPage api={notif} user={user} onOpen={pick} />
         ) : view === 'calendar' ? (
           <Calendar lists={openLists} byList={allTasks} user={user} onOpen={pick} />
+        ) : view === 'music' ? (
+          <Music user={user} music={music} nowPlaying={nowPlaying || ''} />
         ) : view === 'letters' ? (
           <Letters letters={letters} contacts={contacts} favorites={favorites} actions={actions} onOpen={pick}
             onNew={() => setCreating('letter')} />
@@ -496,6 +517,7 @@ const ICONS = {
   close: <path d="M18 6 6 18M6 6l12 12" />,
   heart: <path d="M12 20s-7-4.4-9-8.8C1.6 8 3.6 4.5 7 4.5c2 0 3.4 1.1 5 2.8 1.6-1.7 3-2.8 5-2.8 3.4 0 5.4 3.5 4 6.7C19 15.6 12 20 12 20z" />,
   bell: <><path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9" /><path d="M10.3 21a1.94 1.94 0 0 0 3.4 0" /></>,
+  music: <><path d="M9 18V5l12-2v13" /><circle cx="6" cy="18" r="3" /><circle cx="18" cy="16" r="3" /></>,
 };
 
 function Icon({ name }) {

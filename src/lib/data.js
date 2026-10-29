@@ -67,6 +67,22 @@ export function watchListOrder(uid, onData) {
 export const saveListOrder = (uid, ids) =>
   setDoc(doc(db(), 'users', uid), { listOrder: ids.slice(0, 500), updatedAt: serverTimestamp() }, { merge: true });
 
+// The Spotify link in my sidebar player, i.e. what's playing (on my profile, so it follows me to any device). '' = none.
+export function watchSpotify(uid, onData) {
+  return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().spotify || '' : ''), () => onData(''));
+}
+
+export const saveSpotify = (uid, url) =>
+  setDoc(doc(db(), 'users', uid), { spotify: url, updatedAt: serverTimestamp() }, { merge: true });
+
+// The songs I kept on the Music page: [{ type, id, title, image, addedAt }], newest first
+export function watchMusic(uid, onData) {
+  return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().music || [] : []), () => onData([]));
+}
+
+export const saveMusic = (uid, items) =>
+  setDoc(doc(db(), 'users', uid), { music: items.slice(0, 100), updatedAt: serverTimestamp() }, { merge: true });
+
 // ---------- lists ----------
 const withId = (snap) => snap.docs.map((d) => ({ id: d.id, ...d.data({ serverTimestamps: 'estimate' }) }));
 
