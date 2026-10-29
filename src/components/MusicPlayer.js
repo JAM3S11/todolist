@@ -2,21 +2,42 @@
 import { useEffect, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
 import { saveSpotify } from '@/lib/data';
-import { spotifyEmbed } from '@/lib/spotify';
+import { askToPlay, spotifyApi, spotifyEmbed, spotifyLink, wantsToPlay } from '@/lib/spotify';
 import { useToast } from './Toast';
+
+const same = (a, b) => a.type === b.type && a.id === b.id;
+// one song (or podcast episode) rather than a playlist / album that plays through on its own
+const single = (e) => e && (e.type === 'track' || e.type === 'episode');
+// The player reports where the song is about once a second, and position === duration when it ends
+const atEnd = (d) => d.duration > 0 && d.position >= d.duration - 250;
+const closeToEnd = (d) => d.duration > 0 && d.position >= d.duration - 1500;
 
 // Spotify's own player, docked above my account card. The sidebar never unmounts, so the music keeps playing
 // while I move between pages and lists. Full songs if I'm signed in to Spotify in this browser, else 30-second previews.
-// link: what's playing ('' = nothing, null = loading). onOpenMusic: go to the Music page to pick something.
-// icon: the sidebar's music icon (the collapsed rail shows only that, and the player floats beside it).
-export default function MusicPlayer({ user, link, onOpenMusic, icon }) {
+// ⏮ ⏭ move through My music; 🔁 repeats the song. When a song ends, the next one in My music starts.
+// link: what's playing ('' = nothing, null = loading). music: My music, the play order.
+// onOpenMusic: go to the Music page. icon: the sidebar's music icon (the collapsed rail shows only that).
+export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon }) {
   const toast = useToast();
   const [pop, setPop] = useState(false); // rail: player open beside the icon
-  // Compact player, remembered on this device
+  const [noApi, setNoApi] = useState(false); // Spotify's player controls didn't load: plain player, no auto-next
+  // Compact player and repeat, remembered on this device
   const [small, setSmall] = useState(() => {
     try { return localStorage.getItem('music') === 'small'; } catch { return false; }
   });
+  const [repeat, setRepeat] = useState(() => {
+    try { return localStorage.getItem('music-repeat') === 'one'; } catch { return false; }
+  });
   const box = useRef(null);
+  const host = useRef(null); // Spotify's controller puts its player in here
+  const ctl = useRef(null);
+  const loaded = useRef(''); // the spotify: URI in the player
+  const last = useRef({ position: 0, duration: 0, isPaused: true });
+  const ended = useRef(false);
+
+  const embed = link ? spotifyEmbed(link) : null;
+  const uri = embed ? `spotify:${embed.type}:${embed.id}` : '';
+  const at = embed ? music.findIndex((m) => same(m, embed)) : -1;
 
   // ---- rail popover: a click elsewhere or Escape closes it
   useEffect(() => {
@@ -32,18 +53,98 @@ export default function MusicPlayer({ user, link, onOpenMusic, icon }) {
   }, [pop]);
 
   function toggleSmall() {
-    setSmall((s) => {
-      try { localStorage.setItem('music', s ? 'big' : 'small'); } catch {}
-      return !s;
-    });
+    setSmall(!small);
+    try { localStorage.setItem('music', small ? 'big' : 'small'); } catch {}
+  }
+  function toggleRepeat() {
+    setRepeat(!repeat);
+    try { localStorage.setItem('music-repeat', repeat ? 'off' : 'one'); } catch {}
   }
 
+  const fail = (e) => toast(`Not saved: ${friendlyError(e)}`, 'err');
+  const playItem = (item) => { askToPlay(); saveSpotify(user.uid, spotifyLink(item)).catch(fail); };
   const openMusic = () => { setPop(false); onOpenMusic(); };
-  const remove = () =>
-    saveSpotify(user.uid, '').then(() => toast('Spotify player removed')).catch((e) => toast(`Not saved: ${friendlyError(e)}`, 'err'));
+  const remove = () => saveSpotify(user.uid, '').then(() => toast('Spotify player removed')).catch(fail);
 
-  const embed = link ? spotifyEmbed(link) : null;
+  // ⏭: the next one in My music (round to the first). auto: the song just ended, so stop after the last one.
+  function next(auto = false) {
+    if (!music.length) return;
+    if (auto && at === music.length - 1) return;
+    const item = music[(at + 1) % music.length];
+    if (item && !(embed && same(item, embed))) playItem(item);
+  }
+  // ⏮: a few seconds in, back to the start of this song (like any player); else the one before it
+  function prev() {
+    if (ctl.current && last.current.position > 3000) return ctl.current.restart();
+    if (!music.length) return;
+    const item = music[at <= 0 ? music.length - 1 : at - 1];
+    if (item && !(embed && same(item, embed))) playItem(item);
+    else ctl.current?.restart();
+  }
+
+  // ---- a song ended: play it again (🔁), else the next one. Only for single songs: playlists and albums go on by themselves.
+  const onUpdate = useRef(null);
+  onUpdate.current = (d) => {
+    if (d.playingURI && d.playingURI !== loaded.current) return; // a late report about the song before
+    const was = last.current;
+    last.current = d;
+    if (!single(embed)) return;
+    if (d.position < d.duration - 3000) ended.current = false;
+    // at the end, or stopped / jumped back right before it
+    const done = atEnd(d) || (closeToEnd(was) && !was.isPaused && (d.isPaused || d.position < was.position));
+    if (!done || ended.current) return;
+    ended.current = true;
+    if (repeat) ctl.current?.restart();
+    else next(true);
+  };
+
+  // ---- Spotify's player, with controls: made once there's something to play, gone when the player is removed
+  const hasEmbed = !!embed;
+  const uriNow = useRef(uri);
+  uriNow.current = uri;
+  useEffect(() => {
+    if (!hasEmbed || noApi) return;
+    let gone = false;
+    let mine = null;
+    spotifyApi()
+      .then((api) => {
+        if (gone || !host.current) return;
+        const el = document.createElement('div');
+        host.current.appendChild(el);
+        loaded.current = uriNow.current;
+        api.createController(el, { uri: uriNow.current, width: '100%', height: 152 }, (c) => {
+          if (gone) return c.destroy();
+          mine = c;
+          ctl.current = c;
+          c.addListener('playback_update', (e) => onUpdate.current?.(e.data));
+          // picked something else while the player was loading
+          if (uriNow.current && uriNow.current !== loaded.current) { loaded.current = uriNow.current; c.loadUri(uriNow.current); }
+          if (wantsToPlay()) c.addListener('ready', () => c.play());
+        });
+      })
+      .catch(() => setNoApi(true));
+    return () => {
+      gone = true;
+      mine?.destroy();
+      ctl.current = null;
+      loaded.current = '';
+      if (host.current) host.current.textContent = '';
+    };
+  }, [hasEmbed, noApi]);
+
+  // ---- a different song picked (⏮ ⏭, the Music page, another device): load it, and play it if I asked to here
+  useEffect(() => {
+    const c = ctl.current;
+    if (!c || !uri || uri === loaded.current) return;
+    loaded.current = uri;
+    ended.current = false;
+    last.current = { position: 0, duration: 0, isPaused: true };
+    c.loadUri(uri);
+    if (wantsToPlay()) c.play();
+  }, [uri]);
+
   if (link === null) return null;
+  const canMove = music.length > 1 || (music.length === 1 && at === -1);
 
   return (
     <section ref={box} className={['music', pop && 'pop', embed && 'on'].filter(Boolean).join(' ')} aria-label="Music player">
@@ -54,8 +155,30 @@ export default function MusicPlayer({ user, link, onOpenMusic, icon }) {
       <div className="music-panel">
         {embed ? (
           <>
-            <iframe className="music-frame" src={embed.embedUrl} height={small ? 80 : 152} loading="lazy" title="Spotify player"
-              allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" />
+            {noApi ? (
+              <iframe className="music-frame" src={embed.embedUrl} height={small ? 80 : 152} loading="lazy" title="Spotify player"
+                allow="autoplay; clipboard-write; encrypted-media; fullscreen; picture-in-picture" />
+            ) : (
+              <div ref={host} className={small ? 'music-host small' : 'music-host'} />
+            )}
+            <div className="music-ctl">
+              <button type="button" className="music-ic" onClick={prev} disabled={!canMove && !ctl.current}
+                aria-label="Previous song" title="Previous song">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zM20 5v14L9.5 12z" /></svg>
+              </button>
+              <button type="button" className="music-ic" onClick={() => next()} disabled={!canMove}
+                aria-label="Next song" title="Next song">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM4 5v14l10.5-7z" /></svg>
+              </button>
+              <button type="button" className={repeat ? 'music-ic on' : 'music-ic'} onClick={toggleRepeat} aria-pressed={repeat}
+                disabled={noApi} aria-label="Repeat this song" title={repeat ? 'Repeating this song' : 'Repeat this song'}>
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+                  <path d="M17 2l4 4-4 4" /><path d="M3 11V9a3 3 0 0 1 3-3h15" /><path d="M7 22l-4-4 4-4" /><path d="M21 13v2a3 3 0 0 1-3 3H3" />
+                  {repeat && <text x="12" y="14.5" textAnchor="middle" fontSize="8" fontWeight="700" fill="currentColor" stroke="none">1</text>}
+                </svg>
+              </button>
+              {at >= 0 && <span className="music-pos">{at + 1} / {music.length}</span>}
+            </div>
             <div className="music-bar">
               <button type="button" className="music-act" onClick={toggleSmall}>{small ? 'Bigger' : 'Smaller'}</button>
               <button type="button" className="music-act" onClick={openMusic}>My music</button>
