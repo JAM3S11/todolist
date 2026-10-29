@@ -1,7 +1,7 @@
 'use client';
 import { useEffect, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
-import { saveSpotify } from '@/lib/data';
+import { playSong, stopMusic } from '@/lib/data';
 import { askToPlay, spotifyApi, spotifyEmbed, spotifyLink, wantsToPlay } from '@/lib/spotify';
 import { useToast } from './Toast';
 
@@ -63,23 +63,24 @@ export default function MusicPlayer({ user, link, music = [], onOpenMusic, icon 
   }
 
   const fail = (e) => toast(`Not saved: ${friendlyError(e)}`, 'err');
-  const playItem = (item) => { askToPlay(); saveSpotify(user.uid, spotifyLink(item)).catch(fail); };
+  // how: 'next', 'previous' or 'auto' (the song before ended); noted in my activity (Notifications)
+  const playItem = (item, how) => { askToPlay(); playSong(user, item, spotifyLink(item), how).catch(fail); };
   const openMusic = () => { setPop(false); onOpenMusic(); };
-  const remove = () => saveSpotify(user.uid, '').then(() => toast('Player closed')).catch(fail);
+  const remove = () => stopMusic(user).then(() => toast('Player closed')).catch(fail);
 
   // ⏭: the next one in My music (round to the first). auto: the song just ended, so stop after the last one.
   function next(auto = false) {
     if (!music.length) return;
     if (auto && at === music.length - 1) return;
     const item = music[(at + 1) % music.length];
-    if (item && !(embed && same(item, embed))) playItem(item);
+    if (item && !(embed && same(item, embed))) playItem(item, auto ? 'auto' : 'next');
   }
   // ⏮: a few seconds in, back to the start of this song (like any player); else the one before it
   function prev() {
     if (ctl.current && last.current.position > 3000) return ctl.current.restart();
     if (!music.length) return;
     const item = music[at <= 0 ? music.length - 1 : at - 1];
-    if (item && !(embed && same(item, embed))) playItem(item);
+    if (item && !(embed && same(item, embed))) playItem(item, 'previous');
     else ctl.current?.restart();
   }
 

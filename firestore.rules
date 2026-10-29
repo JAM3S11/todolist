@@ -13,6 +13,7 @@ rules_version = '2';
 //  To-do data layout
 //    users/{uid}                         profile, the list you had open last, your favourite lists, your list order,
 //                                        your Spotify player link, the songs on your Music page
+//    users/{uid}/log/{id}                my own activity, shown to me in Notifications ("You created …")
 //    lists/{listId}                      title, owner, and who it's shared with
 //                                        (kind: 'letter' = a love letter: a body, shared with one person at most):
 //        roles:        { "friend@mail.com": "read" | "comment" | "write" | "readwrite" }
@@ -156,6 +157,26 @@ service cloud.firestore {
         && request.resource.data.get('spotify', '').size() <= 200
         && request.resource.data.get('music', []) is list
         && request.resource.data.get('music', []).size() <= 100;
+    }
+
+    // ---------- my own activity ("You created …", "You added a song …"): only I can see it ----------
+    match /users/{uid}/log/{logId} {
+      function validLog(d) {
+        return d.keys().hasOnly(['kind', 'text', 'detail', 'target', 'listId', 'listTitle', 'letter', 'seen', 'createdAt'])
+          && d.kind is string && d.kind.size() >= 1 && d.kind.size() <= 40
+          && d.get('text', '') is string && d.get('text', '').size() <= 200
+          && d.get('detail', '') is string && d.get('detail', '').size() <= 200
+          && d.get('target', '') is string && d.get('target', '').size() <= 200
+          && d.get('listId', '') is string && d.get('listId', '').size() <= 200
+          && d.get('listTitle', '') is string && d.get('listTitle', '').size() <= 120
+          && d.get('letter', false) is bool
+          && d.seen == false && d.createdAt == request.time;
+      }
+      allow read, delete: if signedIn() && request.auth.uid == uid;
+      allow create: if signedIn() && request.auth.uid == uid && validLog(request.resource.data);
+      allow update: if signedIn() && request.auth.uid == uid
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['seen'])
+        && request.resource.data.seen is bool;
     }
 
     // ---------- lists ----------

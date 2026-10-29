@@ -9,7 +9,15 @@ const dueText = (d) => { const [day, time] = d.split(' '); return `${dueLabel(da
 // Activity on a list or letter: its tag, and what the person did (read as "<who> <did> “<list>”").
 // text: the task or comment it's about; detail: the extra bit (old name, a date, someone's email, an access level).
 // gone: still shown after the list is gone (that's what it's telling you)
+// mine: how it reads in my own activity, where "your" would be wrong ("You changed amani@…'s access …")
+// noList: not about a list (music), so it reads "<who> <did>" with nothing after it
+const PLAYED = {
+  next: (t) => `skipped to ${t}`,
+  previous: (t) => `went back to ${t}`,
+  auto: (t) => `moved on to ${t} automatically`,
+};
 export const ACT = {
+  'list-create': { label: 'Created', did: (n) => (n.letter ? 'started the love letter' : 'created') },
   comment: { label: 'New comment', group: 'comments', did: () => 'commented on' },
   'comment-edit': { label: 'Comment edited', group: 'comments', did: () => 'edited a comment on' },
   'comment-delete': { label: 'Comment deleted', group: 'comments', did: () => 'deleted a comment on' },
@@ -31,20 +39,34 @@ export const ACT = {
   'list-delete': { label: 'Deleted', gone: true, did: () => 'deleted' },
   'member-added': { label: 'New member', did: (n) => `gave ${n.detail} access to` },
   'member-removed': { label: 'Member removed', did: (n) => `removed ${n.detail} from` },
-  'access-changed': { label: 'Your access', did: (n) => `changed your access to ${roleLabel(n.detail).toLowerCase()} on` },
+  'access-changed': {
+    label: 'Your access',
+    did: (n) => `changed your access to ${roleLabel(n.detail).toLowerCase()} on`,
+    mine: (n) => `changed ${n.target}'s access to ${roleLabel(n.detail).toLowerCase()} on`,
+  },
   'access-removed': { label: 'Access removed', gone: true, did: () => 'removed you from' },
   'member-left': { label: 'Member left', did: () => 'left' },
+  'music-add': { label: 'Song added', group: 'music', noList: true, did: (n) => `added ${quote(n.text)} to My music` },
+  'music-remove': { label: 'Song removed', group: 'music', noList: true, did: (n) => `removed ${quote(n.text)} from My music` },
+  'music-play': {
+    label: 'Now playing', group: 'music', noList: true,
+    did: (n) => (PLAYED[n.detail] || ((t) => `started playing ${t}`))(quote(n.text)),
+  },
+  'music-stop': { label: 'Player closed', group: 'music', noList: true, did: () => 'closed the music player' },
 };
 
+// What the person did, worded for whose activity it is
+export const didText = (n) => ((n.self && ACT[n.kind].mine) || ACT[n.kind].did)(n);
+
 export const isComment = (n) => ACT[n.kind]?.group === 'comments';
-export const who = (n) => n.from.displayName || n.from.email;
+export const who = (n) => (n.self ? 'You' : n.from.displayName || n.from.email);
 export const where = (n) => (n.letter ? `the love letter “${n.listTitle}”` : `“${n.listTitle}”`);
 const short = (t) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
 
 // One line: "Amani completed “Pack boxes” in “Moving house”"
 export function toastText(n) {
   if (n.kind === 'share') return `${who(n)} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`;
-  return `${who(n)} ${ACT[n.kind].did(n)} ${where(n)}${n.kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}`;
+  return `${who(n)} ${didText(n)}${ACT[n.kind].noList ? '' : ` ${where(n)}`}${n.kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}`;
 }
 
 // A device notification: the list as the title, what happened as the body.

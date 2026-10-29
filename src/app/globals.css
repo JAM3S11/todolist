@@ -1492,3 +1492,7 @@ textarea.letter-body:focus { outline: none; box-shadow: 0 0 0 2px rgb(90 42 10 /
 .push-prompt svg { flex: none; color: var(--accent); }
 .push-prompt span { flex: 1; min-width: 0; }
 .push-prompt .link { flex: none; font-weight: 600; }
+.nt-ic.k-music .av { font-size: 13px !important; }
+.nt-ic.k-music .nt-ic-mini { background: #1db954; color: #04210f; }
+.nt-kind[class*="k-music-"] { color: #1db954; }
+.nt-kind.k-list-create { color: var(--accent); }
