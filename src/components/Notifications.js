@@ -467,9 +467,9 @@ export function NotificationsPage({ api, user, onOpen }) {
 
 // The detail line under a notification on the page
 function Details({ n }) {
-  const list = (
+  const list = n.listId ? (
     <span className="ntp-list-chip"><i style={{ background: colorFor(n.listId) }} />{n.listTitle}</span>
-  );
+  ) : null;
   if (n.kind === 'share') {
     return (
       <div className="ntp-d">
