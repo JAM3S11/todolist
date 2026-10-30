@@ -17,9 +17,11 @@ export function initials(name = '') {
 }
 
 // Stable colour per person, so they look the same everywhere
-export function colorFor(key = '') {
+// (null too: music notifications have no list)
+export function colorFor(key) {
+  const s = key ? String(key) : '';
   let h = 0;
-  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) >>> 0;
   return COLORS[h % COLORS.length];
 }
 
