@@ -77,6 +77,13 @@ export const saveSpotify = (uid, url) =>
   setDoc(doc(db(), 'users', uid), { spotify: url, updatedAt: serverTimestamp() }, { merge: true });
 
 // The songs I kept on the Music page: [{ type, id, title, image, addedAt }], newest first
+// Which kinds of device notifications I want (Notification settings): { tasks: false, … }; missing = on
+export function watchNotifyPrefs(uid, onData) {
+  return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().notify || {} : {}), () => onData({}));
+}
+export const saveNotifyPref = (uid, key, on) =>
+  setDoc(doc(db(), 'users', uid), { notify: { [key]: !!on }, updatedAt: serverTimestamp() }, { merge: true });
+
 export function watchMusic(uid, onData) {
   return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().music || [] : []), () => onData([]));
 }

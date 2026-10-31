@@ -274,6 +274,14 @@ describe('profiles and invitations', () => {
     assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: 'nope' }, { merge: true })));
   test('music keeps at most 100', () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: Array.from({ length: 101 }, (_, i) => ({ id: String(i) })) }, { merge: true })));
+  test('save your own notification settings', () =>
+    assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { notify: { comments: false, tasks: true }, updatedAt: serverTimestamp() }, { merge: true })));
+  test('notification settings only take the known kinds', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { notify: { spam: true } }, { merge: true })));
+  test('notification settings are on/off only', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { notify: { tasks: 'yes' } }, { merge: true })));
+  test("cannot change someone else's notification settings", () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'writer'), { notify: { tasks: false } }, { merge: true })));
   test("cannot change someone else's music", () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'owner'), { music: [] }, { merge: true })));
   test("cannot change someone else's Spotify link", () =>
