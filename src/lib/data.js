@@ -77,6 +77,18 @@ export const saveSpotify = (uid, url) =>
   setDoc(doc(db(), 'users', uid), { spotify: url, updatedAt: serverTimestamp() }, { merge: true });
 
 // The songs I kept on the Music page: [{ type, id, title, image, addedAt }], newest first
+// Due / overdue reminders I've marked read or removed, so every device agrees: { read: [ids], gone: [ids] }.
+// null when nothing's been saved to the account yet.
+export const MAX_REMINDER_IDS = 300;
+export function watchReminderState(uid, onData) {
+  return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().reminders || null : null), () => onData(null));
+}
+export const saveReminderState = (uid, { read, gone }) =>
+  setDoc(doc(db(), 'users', uid), {
+    reminders: { read: read.slice(-MAX_REMINDER_IDS), gone: gone.slice(-MAX_REMINDER_IDS) },
+    updatedAt: serverTimestamp(),
+  }, { merge: true });
+
 // Which kinds of device notifications I want (Notification settings): { tasks: false, … }; missing = on
 export function watchNotifyPrefs(uid, onData) {
   return onSnapshot(doc(db(), 'users', uid), (s) => onData(s.exists() ? s.data().notify || {} : {}), () => onData({}));

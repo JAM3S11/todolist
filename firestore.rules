@@ -148,7 +148,14 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, delete: if signedIn() && request.auth.uid == uid;
       allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'listOrder', 'spotify', 'music', 'notify', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'listOrder', 'spotify', 'music', 'notify', 'reminders', 'createdAt', 'updatedAt'])
+        // due / overdue reminders I've marked read or removed: { read: [ids], gone: [ids] }
+        && request.resource.data.get('reminders', {}) is map
+        && request.resource.data.get('reminders', {}).keys().hasOnly(['read', 'gone'])
+        && request.resource.data.get('reminders', {}).get('read', []) is list
+        && request.resource.data.get('reminders', {}).get('read', []).size() <= 300
+        && request.resource.data.get('reminders', {}).get('gone', []) is list
+        && request.resource.data.get('reminders', {}).get('gone', []).size() <= 300
         // which kinds of device notifications I want: { share, tasks, comments, members, lists, music } → true/false
         && request.resource.data.get('notify', {}) is map
         && request.resource.data.get('notify', {}).keys().hasOnly(['share', 'tasks', 'comments', 'members', 'lists', 'music'])

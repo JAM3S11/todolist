@@ -274,6 +274,14 @@ describe('profiles and invitations', () => {
     assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: 'nope' }, { merge: true })));
   test('music keeps at most 100', () =>
     assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { music: Array.from({ length: 101 }, (_, i) => ({ id: String(i) })) }, { merge: true })));
+  test('save your own reminder read state', () =>
+    assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { reminders: { read: ['due:l1/t1:2026-10-31'], gone: [] }, updatedAt: serverTimestamp() }, { merge: true })));
+  test('reminder state only takes read and gone', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { reminders: { read: [], other: [] } }, { merge: true })));
+  test('reminder state keeps at most 300', () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'reader'), { reminders: { read: Array.from({ length: 301 }, (_, i) => String(i)), gone: [] } }, { merge: true })));
+  test("cannot change someone else's reminder state", () =>
+    assertFails(setDoc(doc(as('reader'), 'users', 'writer'), { reminders: { read: [], gone: [] } }, { merge: true })));
   test('save your own notification settings', () =>
     assertSucceeds(setDoc(doc(as('reader'), 'users', 'reader'), { notify: { comments: false, tasks: true }, updatedAt: serverTimestamp() }, { merge: true })));
   test('notification settings only take the known kinds', () =>
