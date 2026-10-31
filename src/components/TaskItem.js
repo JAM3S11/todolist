@@ -8,7 +8,6 @@ export default function TaskItem({ task, write, me, onOpen, onToggle, onEdit, on
   const [editing, setEditing] = useState(false);
   const [linking, setLinking] = useState(false); // the "add a link" form under the task
   const [text, setText] = useState(task.text);
-  const [confirm, setConfirm] = useState(false);
 
   function save() {
     const v = text.trim();
@@ -59,29 +58,11 @@ export default function TaskItem({ task, write, me, onOpen, onToggle, onEdit, on
       {write && (
         <TaskMenu task={task} onEdit={startEdit} onOpen={onOpen} onLink={() => setLinking(true)} onArchive={onArchive} onDelete={onDelete} />
       )}
-      {/* desktop: the actions sit on the row */}
-      {write && (
-        <div className="acts">
-          {confirm ? (
-            <>
-              <button className="ic del" type="button" onClick={onDelete}>Confirm delete</button>
-              <button className="ic" type="button" onClick={() => setConfirm(false)}>Cancel</button>
-            </>
-          ) : (
-            <>
-              {!editing && <button className="ic" type="button" onClick={startEdit}>Edit</button>}
-              {!editing && !task.archived && <button className="ic" type="button" onClick={() => setLinking(true)}>Link</button>}
-              <button className="ic" type="button" onClick={onArchive}>{task.archived ? 'Restore' : 'Archive'}</button>
-              <button className="ic del" type="button" onClick={() => setConfirm(true)}>Delete</button>
-            </>
-          )}
-        </div>
-      )}
     </li>
   );
 }
 
-// Phones: the ⋯ on a task opens the same kind of menu as a list's ⋮
+// The ⋯ on a task opens the same kind of menu as a list's ⋮ (phones and desktop)
 function TaskMenu({ task, onEdit, onOpen, onLink, onArchive, onDelete }) {
   const [open, setOpen] = useState(false);
   const [confirm, setConfirm] = useState(false);

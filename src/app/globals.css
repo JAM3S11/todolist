@@ -474,7 +474,6 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
 .task.done .t { text-decoration: line-through; color: var(--muted); }
 .task .t input { width: 100%; border-color: var(--accent); padding: 4px 8px; }
 .task .by { font-family: var(--mono); font-size: 11px; color: var(--muted); white-space: nowrap; }
-.acts { display: flex; gap: 2px; flex: none; }
 .empty { padding: 22px 16px; color: var(--muted); font-size: 14px; }
 .arch-toggle { width: 100%; text-align: left; border: none; border-top: 1px solid var(--line); background: var(--sunk); padding: 10px 16px; font-size: 13px; color: var(--muted); }
 .panel > .arch-toggle:last-child { border-radius: 0 0 var(--r) var(--r); }
@@ -505,7 +504,7 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
 .c-edited { margin-left: 4px; font-style: italic; }
 
 /* list view extras: only shown on phones */
-.lv-tabs, .task-more, .add-plus { display: none; }
+.lv-tabs, .add-plus { display: none; }
 .avatars .av-more { width: 30px; height: 30px; margin-left: -8px; background: var(--sunk); color: var(--muted); font-size: 11px; border: 2px solid var(--bg); }
 
 /* ---- a list on phones and small tablets ---- */
@@ -541,8 +540,8 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
   .add-plus { display: block; }
   .add-l { display: none; }
 
-  /* a task: [✓] [text, notes, then date · who] [⋯]; Edit / Archive / Delete open under it */
-  .task { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "cb t more" ". meta meta" ". acts acts";
+  /* a task: [✓] [text, notes, then date · who] [⋯] */
+  .task { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; grid-template-areas: "cb t more" ". meta meta";
     column-gap: 12px; row-gap: 4px; align-items: start; padding: 12px; }
   .task input[type=checkbox] { grid-area: cb; width: 22px; height: 22px; margin: 1px 0 0; }
   .task .t { grid-area: t; min-width: 0; font-size: 15px; line-height: 1.4; }
@@ -550,14 +549,9 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
   .task > .due-wrap, .task > .due { grid-area: meta; justify-self: start; }
   .task .by { grid-area: meta; justify-self: end; align-self: center; }
   .task .due.empty:not(.icon-only) { opacity: .7; }
-  .task .task-menu { grid-area: more; display: block; }
-  .task-menu .menu-p { top: 32px; right: -6px; z-index: 30; }
-  .task-more { display: grid; place-items: center; width: 34px; height: 34px; margin: -6px -6px 0 0; border: none; border-radius: 8px;
-    background: transparent; color: var(--muted); }
-  .task-more[aria-expanded="true"] { background: var(--sunk); color: var(--fg); }
-  .task .acts { grid-area: acts; display: none; gap: 6px; flex-wrap: wrap; padding-top: 4px; }
-  .task .acts .ic { height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; color: var(--fg); }
-  .task .acts .ic.del { color: var(--danger); border-color: rgb(242 134 122 / .35); }
+  .task .task-menu { grid-area: more; }
+  .task .task-menu .menu-p { right: -6px; }
+  .task .task-more { margin: -6px -6px 0 0; }
   .empty { padding: 18px 12px; }
   .arch-toggle { padding: 12px; }
 
@@ -1300,7 +1294,10 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 .cal-notes-read { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunk); font-size: 14px; white-space: pre-wrap; }
 .task-notes { margin: 2px 0 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; text-decoration: none; }
 .task-loc { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
-.task-menu { display: none; } /* phones only: the ⋯ menu; desktop has the buttons on the row */
+/* the ⋯ on each task, opening the same menu as a list's ⋮ */
+.task-more { display: grid; place-items: center; width: 34px; height: 34px; border: none; border-radius: 8px; background: transparent; color: var(--muted); }
+.task-more:hover, .task-more[aria-expanded="true"] { background: var(--sunk); color: var(--fg); }
+.task-menu .menu-p { top: 36px; right: 0; z-index: 30; }
 
 /* the task's wording opens its details */
 .t-open { padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
