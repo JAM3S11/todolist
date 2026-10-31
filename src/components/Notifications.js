@@ -429,6 +429,7 @@ export function NotificationsPage({ api, user, onOpen }) {
         </div>
       </div>
 
+      <div className="page-body">
       <div className="ntp-list">
         {shown.length === 0 ? (
           <Empty unreadOnly={filter === 'unread' && !q} filtered={filter !== 'all' || !!q} />
@@ -460,6 +461,7 @@ export function NotificationsPage({ api, user, onOpen }) {
             </section>
           ))
         )}
+      </div>
       </div>
     </div>
   );

@@ -441,6 +441,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
         </div>
       </div>
 
+      <div className="page-body">
       {view === 'month' ? (
         <section className="cal-month" aria-label={title}>
           <div className="cal-heads" aria-hidden="true">{HEADS.map((h) => <span key={h}>{h}</span>)}</div>
@@ -502,6 +503,7 @@ export default function Calendar({ lists, byList, user, onOpen }) {
           )}
         </section>
       )}
+      </div>
 
       {quick && (
         <QuickCreate key={`${quick.day}-${quick.start}`} quick={quick} lists={lists.filter((l) => canWrite(l.role))} user={user}

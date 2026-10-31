@@ -122,6 +122,7 @@ export default function LetterView({ list, role, user, contacts, onLeave, onDele
         </div>
       )}
 
+      <div className="page-body">
       <div className={`${comment ? 'grid' : 'grid solo'} show-${pane === 'letter' ? 'tasks' : 'comments'}`}>
         <section className="lv-tasks letter-sheet">
           <BurntPaper seed={list.id} tilt={false} className="letter-paper">
@@ -148,6 +149,7 @@ export default function LetterView({ list, role, user, contacts, onLeave, onDele
           <button className="ic del" type="button" onClick={() => onDelete(list)}>Delete this letter…</button>
         </div>
       )}
+      </div>
 
       {shareOpen && (
         <ShareModal list={list} members={members} contacts={contacts} user={user} onClose={() => setShareOpen(false)} />

@@ -151,6 +151,7 @@ export default function Board({ lists, tasksByList, favorites, actions, onOpen, 
         )}
       </div>
 
+      <div className="page-body">
       {q ? (
         <>
           <div className="board-results" aria-live="polite">
@@ -186,6 +187,7 @@ export default function Board({ lists, tasksByList, favorites, actions, onOpen, 
           )}
         </div>
       )}
+      </div>
     </div>
   );
 }

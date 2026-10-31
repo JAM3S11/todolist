@@ -177,6 +177,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
         </div>
       )}
 
+      <div className="page-body">
       <div className={`${comment ? 'grid' : 'grid solo'} show-${pane}`}>
         <section className="panel lv-tasks">
           <div className="panel-h">
@@ -229,6 +230,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
           <button className="ic del" type="button" onClick={() => onDelete(list)}>Delete this list…</button>
         </div>
       )}
+      </div>
 
       {shareOpen && (
         <ShareModal list={list} members={members} contacts={contacts} user={user} onClose={() => setShareOpen(false)} />
