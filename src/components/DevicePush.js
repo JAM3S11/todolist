@@ -18,8 +18,8 @@ export function usePush(user) {
       setState(next);
       if (next === 'on' && ok) toast(ok);
       if (next === 'blocked') toast('Notifications are blocked for this site. Allow them in your browser settings.', 'err');
-    } catch {
-      toast("Couldn't turn device notifications on here. Try again, or try another browser.", 'err');
+    } catch (e) {
+      toast(e?.message || "Couldn't turn device notifications on here. Try again, or try another browser.", 'err');
       setState(await pushState());
     }
     setBusy(false);
