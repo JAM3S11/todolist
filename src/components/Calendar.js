@@ -1,8 +1,8 @@
 'use client';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { addTask, addTaskLink, createList, removeTaskLink, updateTask, watchTasks } from '@/lib/data';
+import { addTask, addTaskLink, createList, deleteTask, removeTaskLink, updateTask, watchTasks } from '@/lib/data';
 import {
-  DEFAULT_MINS, DURATIONS, TIMES, addDays, dueLabel, durLabel, fromKey, fromMin, isOverdue, longDay, monthDays,
+  DEFAULT_MINS, addDays, dueLabel, fromKey, fromMin, isOverdue, longDay, monthDays,
   monthTitle, snap, timeRange, toKey, toMin, todayKey, weekday,
 } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
@@ -12,7 +12,7 @@ import { colorFor, initials, toDate } from '@/lib/people';
 import DuePicker from './DuePicker';
 import Loading, { Spinner } from './Loading';
 import Select, { inDropdown } from './Select';
-import TaskLinks from './TaskLinks';
+import TaskDetails, { TimeFields } from './TaskDetails';
 import { useToast } from './Toast';
 
 const HEADS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
@@ -133,6 +133,10 @@ export default function Calendar({ lists, byList, user, onOpen }) {
       run(updateTask(l, t, user, patch), `Moved to ${when(due, patch.start, patch.mins)}`);
     },
     notes: ({ t, l }, notes) => (t.notes || '') !== notes && run(updateTask(l, t, user, { notes }), 'Notes saved'),
+    location: ({ t, l }, location) => (t.location || '') !== location && run(updateTask(l, t, user, { location }), location ? 'Location saved' : 'Location removed'),
+    text: ({ t, l }, text) => text !== t.text && run(updateTask(l, t, user, { text }), 'Task renamed'),
+    archive: ({ t, l }) => run(updateTask(l, t, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
+    remove: ({ t, l }) => run(deleteTask(l, t, user), 'Task deleted'),
     addLink: ({ t, l }, link) => run(addTaskLink(l, t, user, link), 'Link added'),
     removeLink: ({ t, l }, link) => run(removeTaskLink(l, t, user, link), 'Link removed'),
     open: ({ t, l }) => { setPop(null); setTray(false); setQuick(null); setPanel({ listId: l.id, taskId: t.id }); },
@@ -801,29 +805,6 @@ function YearsView({ start, current, selected, byDay, onPick }) {
   );
 }
 
-// "All day" or a start time + length
-function TimeFields({ start, mins, onChange, idPrefix }) {
-  const allDay = !start;
-  return (
-    <div className="time-fields">
-      <label className="chk">
-        <input type="checkbox" checked={allDay}
-          onChange={(e) => onChange(e.target.checked ? { start: null, mins } : { start: '09:00', mins: mins || DEFAULT_MINS })} />
-        All day
-      </label>
-      {!allDay && (
-        <>
-          <Select id={`${idPrefix}-start`} className="time-sel" value={start} onChange={(v) => onChange({ start: v, mins })} label="Start time"
-            options={(TIMES.includes(start) ? TIMES : [start, ...TIMES]).map((t) => ({ value: t, label: t }))} />
-          <span className="time-for">for</span>
-          <Select id={`${idPrefix}-mins`} className="time-sel" value={mins} onChange={(v) => onChange({ start, mins: v })} label="Length"
-            options={(DURATIONS.includes(mins) ? DURATIONS : [mins, ...DURATIONS]).map((d) => ({ value: d, label: durLabel(d) }))} />
-        </>
-      )}
-    </div>
-  );
-}
-
 // Which list a new task goes into: one you can write to, or a new list made on save
 const NEW_LIST = '__new';
 function useListChoice(lists, init = {}) {
@@ -1022,66 +1003,25 @@ function TaskRow({ entry, actions, picker = true }) {
 // Side panel for one task (a sheet from the bottom on phones)
 function TaskPanel({ entry, actions, onClose }) {
   const { t, l } = entry;
-  const write = canWrite(l.role);
   const box = useRef(null);
   useClickAway(box, true, onClose);
+  const on = {
+    toggle: () => actions.toggle(entry),
+    text: (text) => actions.text(entry, text),
+    notes: (notes) => actions.notes(entry, notes),
+    location: (location) => actions.location(entry, location),
+    due: (due) => actions.due(entry, due),
+    schedule: (due, start, mins) => actions.schedule(entry, due, start, mins),
+    addLink: (link) => actions.addLink(entry, link),
+    removeLink: (link) => actions.removeLink(entry, link),
+    archive: () => { onClose(); actions.archive(entry); },
+    remove: () => { onClose(); actions.remove(entry); },
+  };
   return (
     <aside className="cal-panel" ref={box} role="dialog" aria-label={t.text}>
-      <div className="cal-panel-h">
-        <span className="cal-r-m"><i style={{ background: colorFor(l.id) }} />{l.title}</span>
-        <button className="ic" type="button" onClick={onClose} aria-label="Close">✕</button>
-      </div>
-      <label className={t.done ? 'cal-panel-t done' : 'cal-panel-t'}>
-        <input type="checkbox" checked={t.done} disabled={!write} onChange={() => actions.toggle(entry)} aria-label="Done" />
-        <span>{t.text}</span>
-      </label>
-      <NotesField key={t.id} value={t.notes || ''} canEdit={write} onSave={(notes) => actions.notes(entry, notes)} />
-      <PanelLinks key={`links-${t.id}`} entry={entry} canEdit={write} actions={actions} />
-      <dl className="cal-panel-d">
-        <dt>Date</dt>
-        <dd><DuePicker value={t.due || null} task={t} canEdit={write} onChange={(due) => actions.due(entry, due)} /></dd>
-        {t.due && (
-          <>
-            <dt>Time</dt>
-            <dd>
-              {write ? (
-                <TimeFields start={t.start || null} mins={t.mins || DEFAULT_MINS} idPrefix="panel"
-                  onChange={({ start, mins }) => actions.schedule(entry, t.due, start, mins)} />
-              ) : t.start ? timeRange(t.start, t.mins) : 'All day'}
-            </dd>
-          </>
-        )}
-        <dt>Status</dt>
-        <dd>{t.done ? 'Done' : isOverdue(t) ? <span className="late-txt">Overdue</span> : 'Open'}</dd>
-        <dt>Added by</dt>
-        <dd>{t.createdByName || 'Someone'}</dd>
-      </dl>
-      {!write && <p className="cal-hint">You can view this task but not change it.</p>}
-      <button type="button" className="btn block" onClick={() => actions.openList(l)}>Open “{l.title}”</button>
+      <TaskDetails task={t} list={l} write={canWrite(l.role)} on={on} onClose={onClose}
+        footer={<button type="button" className="btn block" onClick={() => actions.openList(l)}>Open “{l.title}”</button>} />
     </aside>
-  );
-}
-
-// Links on the task; the add form closes when another task opens (keyed by task)
-function PanelLinks({ entry, canEdit, actions }) {
-  const [adding, setAdding] = useState(false);
-  return (
-    <TaskLinks links={entry.t.links} canEdit={canEdit} adding={adding} setAdding={setAdding} addButton
-      onAdd={(link) => actions.addLink(entry, link)} onRemove={(link) => actions.removeLink(entry, link)} />
-  );
-}
-
-// "What's going to be done": saved when you click away
-function NotesField({ value, canEdit, onSave }) {
-  const [text, setText] = useState(value);
-  useEffect(() => setText(value), [value]);
-  if (!canEdit) return value ? <p className="cal-notes-read">{value}</p> : null;
-  return (
-    <label className="field cal-notes">
-      <span>What&apos;s going to be done</span>
-      <textarea rows={3} maxLength={2000} value={text} onChange={(e) => setText(e.target.value)}
-        onBlur={() => onSave(text.trim())} placeholder="Details, steps, links…" />
-    </label>
   );
 }
 

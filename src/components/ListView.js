@@ -21,6 +21,8 @@ import TaskItem from './TaskItem';
 import Comments from './Comments';
 import ShareModal from './ShareModal';
 import Loading from './Loading';
+import TaskDetails from './TaskDetails';
+import { inDropdown } from './Select';
 
 export default function ListView({ list, role, user, contacts, onLeave, onDelete, onArchive, menu }) {
   const toast = useToast();
@@ -37,6 +39,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
   const [title, setTitle] = useState(list.title);
   const [newTask, setNewTask] = useDraft(`draft:task:${list.id}`);
   const [newDue, setNewDue] = useState(null);
+  const [openId, setOpenId] = useState(null); // the task whose details popup is open
 
   useEffect(() => setTitle(list.title), [list.title]);
 
@@ -103,6 +106,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     task: t,
     write,
     me: user.uid,
+    onOpen: () => setOpenId(t.id),
     onToggle: () => run(updateTask(list, t, user, { done: !t.done })),
     onEdit: (text) => run(updateTask(list, t, user, { text })),
     // removing the date also removes its time
@@ -113,6 +117,29 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     onAddLink: (link) => run(addTaskLink(list, t, user, link), 'Link added'),
     onRemoveLink: (link) => run(removeTaskLink(list, t, user, link), 'Link removed'),
   });
+
+  // the popup follows the live task, and goes away if the task is deleted
+  const openTask = openId ? (tasks || []).find((t) => t.id === openId) : null;
+  const detailsOn = (t) => {
+    const p = taskProps(t);
+    return {
+      toggle: p.onToggle,
+      text: (text) => text !== t.text && run(updateTask(list, t, user, { text }), 'Task renamed'),
+      notes: (notes) => (t.notes || '') !== notes && run(updateTask(list, t, user, { notes }), 'Notes saved'),
+      location: (location) => (t.location || '') !== location &&
+        run(updateTask(list, t, user, { location }), location ? 'Location saved' : 'Location removed'),
+      due: p.onDue,
+      schedule: (due, start, mins) => {
+        const patch = { due, start: start || null, mins: start ? mins : null };
+        if ((t.start || null) === patch.start && (t.mins || null) === patch.mins) return;
+        run(updateTask(list, t, user, patch), start ? 'Time saved' : 'Set to all day');
+      },
+      addLink: p.onAddLink,
+      removeLink: p.onRemoveLink,
+      archive: p.onArchive,
+      remove: () => { setOpenId(null); p.onDelete(); },
+    };
+  };
 
   return (
     <div className="list-wrap">
@@ -232,9 +259,32 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
       )}
       </div>
 
+      {openTask && (
+        <TaskModal task={openTask} list={list} write={write} on={detailsOn(openTask)} onClose={() => setOpenId(null)} />
+      )}
+
       {shareOpen && (
         <ShareModal list={list} members={members} contacts={contacts} user={user} onClose={() => setShareOpen(false)} />
       )}
+    </div>
+  );
+}
+
+// A task's details as a popup over the list (a sheet from the bottom on phones)
+function TaskModal({ task, list, write, on, onClose }) {
+  // leave the field being typed in first, so its text saves (fields save when you click away)
+  const close = useRef(null);
+  close.current = () => { document.activeElement?.blur?.(); onClose(); };
+  useEffect(() => {
+    const onKey = (e) => e.key === 'Escape' && !inDropdown(e.target) && close.current();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, []);
+  return (
+    <div className="scrim task-scrim" onMouseDown={(e) => e.target === e.currentTarget && close.current()}>
+      <div className="modal task-modal" role="dialog" aria-modal="true" aria-label={task.text}>
+        <TaskDetails task={task} list={list} write={write} on={on} onClose={() => close.current()} />
+      </div>
     </div>
   );
 }
