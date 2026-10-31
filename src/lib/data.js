@@ -300,7 +300,8 @@ const stamp = (user) => ({ updatedAt: serverTimestamp(), updatedBy: user.uid, up
 // due: optional 'YYYY-MM-DD' (see lib/dates.js); notes: optional details of what's going to be done;
 // time: optional { start: 'HH:MM', mins } on that day (no time = all day)
 // list: the list it goes in (just { id } for a list nobody else is on yet)
-export function addTask(list, user, text, due = null, notes = '', time = null) {
+// extra (optional): { location, links: [{ url, title }] }
+export function addTask(list, user, text, due = null, notes = '', time = null, extra = {}) {
   const listId = list.id;
   const b = writeBatch(db());
   b.set(doc(tasksCol(listId)), {
@@ -310,6 +311,8 @@ export function addTask(list, user, text, due = null, notes = '', time = null) {
     ...(due ? { due } : {}),
     ...(notes ? { notes } : {}),
     ...(due && time?.start ? { start: time.start, mins: time.mins || 60 } : {}),
+    ...(extra.location ? { location: extra.location } : {}),
+    ...(extra.links?.length ? { links: extra.links } : {}),
     createdBy: user.uid,
     createdByName: nameOf(user),
     createdAt: serverTimestamp(),

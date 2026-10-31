@@ -2,7 +2,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { friendlyError } from '@/lib/firebase';
 import {
-  addTask,
   addTaskLink,
   deleteTask,
   removeTaskLink,
@@ -13,10 +12,9 @@ import {
 } from '@/lib/data';
 import { PERMISSIONS, canComment, canWrite, roleLabel } from '@/lib/permissions';
 import { Avatar } from '@/lib/people';
-import { useDraft } from '@/lib/useDraft';
 import { dueLabel } from '@/lib/dates';
 import { useToast } from './Toast';
-import DuePicker from './DuePicker';
+import AddTask from './AddTask';
 import TaskItem from './TaskItem';
 import Comments from './Comments';
 import ShareModal from './ShareModal';
@@ -37,8 +35,6 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
   const [shareOpen, setShareOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(list.title);
-  const [newTask, setNewTask] = useDraft(`draft:task:${list.id}`);
-  const [newDue, setNewDue] = useState(null);
   const [openId, setOpenId] = useState(null); // the task whose details popup is open
 
   useEffect(() => setTitle(list.title), [list.title]);
@@ -74,19 +70,6 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
   const run = (promise, okMsg) =>
     promise.then(() => okMsg && toast(okMsg)).catch((e) => toast(`Not saved: ${friendlyError(e)}`, 'err'));
 
-  function onAdd(e) {
-    e.preventDefault();
-    const text = newTask.trim();
-    if (!text) return;
-    const due = newDue;
-    setNewTask('');
-    setNewDue(null);
-    addTask(list, user, text, due).catch((err) => {
-      setNewTask(text);
-      setNewDue(due);
-      toast(`Not saved: ${friendlyError(err)}`, 'err');
-    });
-  }
 
   async function saveTitle(e) {
     e?.preventDefault();
@@ -213,15 +196,7 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
           </div>
 
           {write && (
-            <form className="add" onSubmit={onAdd}>
-              <input id="new-task" value={newTask} onChange={(e) => setNewTask(e.target.value)} placeholder="Add a task" autoComplete="off" maxLength={500}
-                enterKeyHint="done" />
-              <DuePicker value={newDue} onChange={setNewDue} compact />
-              <button className="btn primary" type="submit" aria-label="Add task">
-                <svg className="add-plus" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
-                <span className="add-l">Add</span>
-              </button>
-            </form>
+            <AddTask list={list} user={user} />
           )}
 
           <ul className="tasks">
