@@ -77,12 +77,6 @@ function WorkspaceInner({ user }) {
   const goingAway = useRef(null); // list I'm deleting or leaving on purpose, so it doesn't count as "access removed"
   const menuBtn = useRef(null);
   const closeBtn = useRef(null);
-  const mainRef = useRef(null);
-
-  // ---- the main view scrolls on its own: start each page / list at the top
-  useEffect(() => {
-    mainRef.current?.scrollTo(0, 0);
-  }, [view, activeId]);
   // Desktop sidebar collapsed to icons, remembered on this device (Workspace only renders in the browser, after sign-in)
   const [rail, setRail] = useState(() => {
     try { return localStorage.getItem('sidebar') === 'rail'; } catch { return false; }
@@ -431,7 +425,7 @@ function WorkspaceInner({ user }) {
         </div>
       </aside>
 
-      <main className="main" ref={mainRef}>
+      <main className="main">
         {lists === null ? (
           <Loading variant="page" hint="Getting your lists ready" />
         ) : view === 'notifications' ? (

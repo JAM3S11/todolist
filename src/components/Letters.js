@@ -90,6 +90,7 @@ export default function Letters({ letters, contacts, favorites, actions, onOpen,
         </div>
       </header>
 
+      <div className="page-body">
       <section className="letters-sec" aria-label="Written by you">
         <h2 className="letters-h">Written by you <span className="count">{mine.length}</span></h2>
         <div className="letters">
@@ -114,6 +115,7 @@ export default function Letters({ letters, contacts, favorites, actions, onOpen,
           <div className="letters">{archived.map(card)}</div>
         </section>
       )}
+      </div>
     </div>
   );
 }

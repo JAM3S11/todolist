@@ -333,14 +333,23 @@ button.music-next:hover b { color: var(--accent); }
 .me-email { font-family: var(--mono); font-size: 11px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .me .side-btn:hover { background: var(--danger-soft); color: var(--danger); }
 .only-mobile { display: none; }
-.main { min-width: 0; padding: 24px max(16px, env(safe-area-inset-right)) 40px 24px; }
-
-/* Desktop: the page never scrolls as a whole. The sidebar keeps its width and scrolls its lists inside itself;
-   the main view scrolls on its own. */
+/* The window never scrolls as a whole. The sidebar scrolls its lists inside itself, and on every page the
+   header part (title, buttons, search, filters, tabs) stays put while only .page-body under it scrolls. */
+.shell { height: 100vh; height: 100dvh; overflow: hidden; }
+.main { min-width: 0; min-height: 0; display: flex; flex-direction: column; overflow: hidden; padding-top: 24px;
+  --pg-l: 24px; --pg-r: max(16px, env(safe-area-inset-right)); --pg-b: 40px; --page-max: 100000px; }
+.main > :is(.center, .loading) { flex: 1; min-height: 0; overflow-y: auto; }
+.main > :is(.board-wrap, .cal-wrap, .ntp, .list-wrap) { flex: 1; min-height: 0; width: 100%; max-width: none; margin: 0; }
+/* the fixed part keeps the page's centred column... */
+.main > :is(.board-wrap, .cal-wrap, .ntp, .list-wrap) > :not(.page-body) { flex: none;
+  margin-left: max(var(--pg-l), calc((100% - var(--page-max)) / 2)); margin-right: max(var(--pg-r), calc((100% - var(--page-max)) / 2)); }
+/* ...and the scrolling part spans the full width, so its scrollbar sits at the window edge */
+.page-body { flex: 1; min-height: 0; display: flex; flex-direction: column; gap: inherit; overflow-y: auto; overscroll-behavior: contain;
+  scrollbar-width: thin; scrollbar-gutter: stable;
+  padding: 0 max(var(--pg-r), calc((100% - var(--page-max)) / 2)) var(--pg-b) max(var(--pg-l), calc((100% - var(--page-max)) / 2)); }
+.page-body > * { flex-shrink: 0; }
 @media (min-width: 861px) {
-  .shell { height: 100vh; height: 100dvh; overflow: hidden; }
   .side { height: 100%; min-height: 0; }
-  .main { height: 100%; min-height: 0; overflow-y: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-gutter: stable; }
 }
 
 /* Desktop: the sidebar can collapse to an icon rail */
@@ -425,7 +434,7 @@ button.music-next:hover b { color: var(--accent); }
   .side.open .side-scrim { opacity: 1; pointer-events: auto; }
   html:has(.side.open) { overflow: hidden; } /* page behind the drawer doesn't scroll */
 
-  .main { padding: 16px max(16px, env(safe-area-inset-right)) 32px max(16px, env(safe-area-inset-left)); }
+  .main { padding-top: 16px; --pg-l: max(16px, env(safe-area-inset-left)); --pg-b: 32px; }
 }
 
 @media (max-width: 860px) and (prefers-reduced-motion: no-preference) {
@@ -435,7 +444,7 @@ button.music-next:hover b { color: var(--accent); }
 }
 
 /* list view */
-.list-wrap { max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
+.list-wrap { --page-max: 1080px; max-width: 1080px; margin: 0 auto; display: flex; flex-direction: column; gap: 16px; }
 .bar { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; justify-content: space-between; }
 .bar-left { min-width: 0; }
 .bar-left h1 { overflow-wrap: anywhere; }
@@ -511,12 +520,12 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
   .archived-banner { display: flex; align-items: center; gap: 10px; }
 
   /* Tasks | Comments tabs; only the chosen one shows */
-  .lv-tabs { display: flex; position: sticky; top: calc(var(--topbar) + env(safe-area-inset-top)); z-index: 5; }
+  .lv-tabs { display: flex; }
   .lv-tabs button { flex: 1; height: 36px; display: inline-flex; align-items: center; justify-content: center; gap: 6px; font-size: 14px; }
   .lv-tabs button span { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--sunk); font-family: var(--mono); font-size: 11px; color: var(--muted); }
   .lv-tabs button.on span { background: var(--accent-soft); color: var(--accent); }
   .grid.show-tasks .comments, .grid.show-comments .lv-tasks { display: none; }
-  .lv-tasks .panel-h, .lv-tabs ~ .grid .comments > .panel-h { display: none; } /* the tabs already say "Tasks 2/5", "Comments 3" */
+  .lv-tasks .panel-h, .lv-tabs ~ .page-body .comments > .panel-h { display: none; } /* the tabs already say "Tasks 2/5", "Comments 3" */
   .grid.solo .lv-tasks .panel-h { display: flex; }
 
   /* adding a task: the box, the date, and a round + */
@@ -912,7 +921,7 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 }
 
 /* ---------- Calendar ---------- */
-.cal-wrap { display: flex; flex-direction: column; gap: 14px; max-width: 1400px; margin: 0 auto; }
+.cal-wrap { --page-max: 1400px; display: flex; flex-direction: column; gap: 14px; max-width: 1400px; margin: 0 auto; }
 .btn.sq { width: 34px; height: 34px; padding: 0; font-size: 18px; }
 .cal-count { min-width: 20px; padding: 0 6px; border-radius: 999px; background: var(--sunk); font-family: var(--mono); font-size: 11px; color: var(--muted); }
 
@@ -1240,7 +1249,7 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 }
 /* phones: a compact toolbar, the title on its own line, and + New task as a round button in the corner */
 @media (max-width: 560px) {
-  .cal-wrap { gap: 10px; padding-bottom: 72px; } /* room for the round + button */
+  .cal-wrap { gap: 10px; --pg-b: 72px; } /* room for the round + button */
   .cal-wrap > .bar .meta { display: none; }
   .cal-toolbar > .btn, .cal-sort, .cal-filter { flex: 1 1 0; min-width: 0; }
   .cal-toolbar .btn { padding: 0 10px; }
@@ -1312,7 +1321,7 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 }
 
 /* ---------- Notifications page ---------- */
-.ntp { display: flex; flex-direction: column; gap: 18px; max-width: 980px; margin: 0 auto; }
+.ntp { --page-max: 980px; display: flex; flex-direction: column; gap: 18px; max-width: 980px; margin: 0 auto; }
 .ntp-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
 .ntp-stat { position: relative; display: flex; flex-direction: column; gap: 4px; padding: 14px 16px; overflow: hidden;
   border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
@@ -1421,10 +1430,10 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 .paper-in { position: relative; padding: 34px 36px 30px; }
 
 /* the page of cards */
-.letters-wrap { max-width: 1080px; margin: 0 auto; width: 100%; }
+.letters-wrap { --page-max: 1080px; max-width: 1080px; margin: 0 auto; width: 100%; }
 
 /* Music page: find songs on Spotify, keep them, play them in the sidebar player */
-.music-wrap { max-width: 760px; margin: 0 auto; width: 100%; }
+.music-wrap { --page-max: 760px; max-width: 760px; margin: 0 auto; width: 100%; }
 .music-sec { display: flex; flex-direction: column; gap: 10px; padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
 .music-h2 { display: flex; align-items: center; gap: 8px; font-size: 16px; }
 .music-h2 .count { font-family: var(--mono); font-size: 12px; font-weight: 400; color: var(--muted); }

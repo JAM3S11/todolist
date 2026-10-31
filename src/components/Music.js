@@ -178,6 +178,18 @@ export default function Music({ user, music, nowPlaying }) {
             aria-controls="music-results" aria-expanded={!!results?.length} />
         </div>
 
+        <form className="music-row-f" onSubmit={(e) => { e.preventDefault(); add(link); }}>
+          {/* not type="url": a spotify: link isn't a web address */}
+          <input ref={linkInput} inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="Have a Spotify link already? Paste it here"
+            value={link} maxLength={MAX_SPOTIFY} onChange={(e) => { setLink(e.target.value); setErr(''); }} aria-label="Spotify link" autoComplete="off" />
+          <button className="btn" type="submit" disabled={!link.trim() || adding}>{adding ? 'Adding…' : 'Add & play'}</button>
+        </form>
+        {err && <p className="link-err" role="alert">{err}</p>}
+      </section>
+
+      <div className="page-body">
+      {(q.trim().length >= 2 || pending) && (
+        <section className="music-sec" aria-label="Search results">
         {q.trim().length >= 2 && (
           <div className="music-results" id="music-results" aria-busy={searching}>
             {searchErr ? <p className="link-err" role="alert">{searchErr}</p>
@@ -234,15 +246,8 @@ export default function Music({ user, music, nowPlaying }) {
             </div>
           </div>
         )}
-
-        <form className="music-row-f" onSubmit={(e) => { e.preventDefault(); add(link); }}>
-          {/* not type="url": a spotify: link isn't a web address */}
-          <input ref={linkInput} inputMode="url" autoCapitalize="none" spellCheck={false} placeholder="Have a Spotify link already? Paste it here"
-            value={link} maxLength={MAX_SPOTIFY} onChange={(e) => { setLink(e.target.value); setErr(''); }} aria-label="Spotify link" autoComplete="off" />
-          <button className="btn" type="submit" disabled={!link.trim() || adding}>{adding ? 'Adding…' : 'Add & play'}</button>
-        </form>
-        {err && <p className="link-err" role="alert">{err}</p>}
-      </section>
+        </section>
+      )}
 
       <section className="music-sec" aria-labelledby="music-mine">
         <div className="music-head">
@@ -300,6 +305,7 @@ export default function Music({ user, music, nowPlaying }) {
           </>
         )}
       </section>
+      </div>
     </div>
   );
 }
