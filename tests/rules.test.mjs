@@ -176,6 +176,14 @@ describe('tasks', () => {
     assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'Call ahead first' }))));
   test('notes must be text of at most 2000 characters', () =>
     assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { notes: 'x'.repeat(2001) }))));
+  test('can add a location to a task', () =>
+    assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { location: 'Westlands, Nairobi' }))));
+  test('can set the location of an existing task', () =>
+    assertSucceeds(updateDoc(doc(as('rw'), 'lists', LIST, 'tasks', 't1'), { location: 'Karura Forest', ...stamp('rw') })));
+  test('location must be text of at most 200 characters', () =>
+    assertFails(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { location: 'x'.repeat(201) }))));
+  test('reader cannot set a location', () =>
+    assertFails(updateDoc(doc(as('reader'), 'lists', LIST, 'tasks', 't1'), { location: 'Somewhere', ...stamp('reader') })));
   test('can add links to a task', () =>
     assertSucceeds(addDoc(collection(as('writer'), 'lists', LIST, 'tasks'), task('writer', { links: [{ url: 'https://example.com', title: 'Example' }] }))));
   test('can add a link to an existing task', () =>

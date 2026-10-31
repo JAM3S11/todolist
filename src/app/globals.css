@@ -544,11 +544,12 @@ ul.tasks { list-style: none; margin: 0; padding: 0; }
   .task > .due-wrap, .task > .due { grid-area: meta; justify-self: start; }
   .task .by { grid-area: meta; justify-self: end; align-self: center; }
   .task .due.empty:not(.icon-only) { opacity: .7; }
-  .task-more { grid-area: more; display: grid; place-items: center; width: 34px; height: 34px; margin: -6px -6px 0 0; border: none; border-radius: 8px;
+  .task .task-menu { grid-area: more; display: block; }
+  .task-menu .menu-p { top: 32px; right: -6px; z-index: 30; }
+  .task-more { display: grid; place-items: center; width: 34px; height: 34px; margin: -6px -6px 0 0; border: none; border-radius: 8px;
     background: transparent; color: var(--muted); }
   .task-more[aria-expanded="true"] { background: var(--sunk); color: var(--fg); }
   .task .acts { grid-area: acts; display: none; gap: 6px; flex-wrap: wrap; padding-top: 4px; }
-  .task.acts-open .acts { display: flex; }
   .task .acts .ic { height: 34px; padding: 0 14px; border: 1px solid var(--line); border-radius: 8px; font-size: 13px; color: var(--fg); }
   .task .acts .ic.del { color: var(--danger); border-color: rgb(242 134 122 / .35); }
   .empty { padding: 18px 12px; }
@@ -1289,6 +1290,47 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 .cal-notes textarea { width: 100%; }
 .cal-notes-read { margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunk); font-size: 14px; white-space: pre-wrap; }
 .task-notes { margin: 2px 0 0; font-size: 13px; color: var(--muted); white-space: pre-wrap; text-decoration: none; }
+.task-loc { margin: 2px 0 0; font-size: 12.5px; color: var(--muted); overflow-wrap: anywhere; }
+.task-menu { display: none; } /* phones only: the ⋯ menu; desktop has the buttons on the row */
+
+/* the task's wording opens its details */
+.t-open { padding: 0; border: none; background: none; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: pointer; }
+.t-open:hover { text-decoration: underline; text-decoration-color: var(--muted); text-underline-offset: 3px; }
+.t-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+
+/* task details: the popup in a list (and the Calendar's side panel) */
+.modal.task-modal { width: min(480px, 100%); max-height: calc(100dvh - 32px); padding: 18px; display: flex; flex-direction: column; gap: 14px; }
+.td-title { padding: 2px 4px; margin: -2px -4px; border: none; border-radius: 6px; background: none; color: inherit; font: inherit; text-align: left; overflow-wrap: anywhere; cursor: text; }
+.td-title:hover { background: var(--sunk); }
+.td-title-in { flex: 1; min-width: 0; font-family: var(--display); font-size: 18px; font-weight: 600; }
+.td-loc .field-top > span { color: var(--muted); }
+.td-loc-in { position: relative; display: flex; align-items: center; }
+.td-loc-in svg { position: absolute; left: 10px; color: var(--muted); pointer-events: none; }
+.td-loc-in input { width: 100%; padding-left: 32px; }
+.td-loc-in:focus-within svg { color: var(--accent); }
+.td-maps { font-size: 12.5px; color: var(--accent); text-decoration: none; white-space: nowrap; }
+.td-maps:hover { text-decoration: underline; }
+.td-loc-read { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 8px; margin: 0; padding: 10px 12px; border-radius: 10px; background: var(--sunk); font-size: 14px; }
+.td-loc-read svg { flex: none; color: var(--muted); }
+.td-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding-top: 14px; border-top: 1px solid var(--line); }
+.td-acts .btn { height: 40px; }
+.td-del { color: var(--danger); border-color: rgb(242 134 122 / .35); }
+.td-del:hover, .td-del.on { background: var(--danger-soft); border-color: var(--danger); }
+.td-del.on { color: var(--danger); font-weight: 600; }
+@media (prefers-reduced-motion: no-preference) {
+  .task-modal { animation: pop .16s ease-out; }
+}
+/* phones: a sheet up from the bottom, with bigger things to tap */
+@media (max-width: 560px) {
+  .scrim.task-scrim { place-items: end stretch; padding: 0; }
+  .modal.task-modal { width: 100%; max-height: 88dvh; border-radius: 16px 16px 0 0; border-bottom: none; overflow-y: auto; overscroll-behavior: contain;
+    padding: 16px 16px max(16px, env(safe-area-inset-bottom)); }
+  .task-modal :is(input:not([type=checkbox]), textarea, .btn) { font-size: 16px; } /* no zoom-in on iPhone */
+  .task-modal .td-loc-in input, .td-title-in { height: 44px; }
+  .td-acts { grid-template-columns: 1fr; }
+  .td-acts .btn { height: 46px; }
+  .cal-panel-d { grid-template-columns: 80px minmax(0, 1fr); }
+}
 
 /* links on a task: chips that open in a new tab, and the small "add a link" form */
 .task-links { display: flex; flex-direction: column; gap: 6px; margin-top: 6px; }
@@ -1297,7 +1339,7 @@ button.due:hover { border-color: var(--accent); color: var(--fg); }
 .t-line { display: inline-flex; flex-wrap: wrap; align-items: center; column-gap: 10px; row-gap: 4px; }
 .t-line .link-chips { display: inline-flex; }
 .t-line .link-chip { height: 22px; }
-.task.done .t-line > span:first-child { text-decoration: line-through; } /* the strike-through doesn't reach inside the inline-flex line */
+.task.done .t-line > .t-open { text-decoration: line-through; } /* the strike-through doesn't reach inside the inline-flex line */
 .link-chip { display: inline-flex; align-items: center; max-width: 100%; height: 26px; border: 1px solid var(--line); border-radius: 999px;
   background: var(--surface); font-size: 12px; text-decoration: none; }
 .link-chip:hover { border-color: var(--accent); }
