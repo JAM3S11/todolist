@@ -1,6 +1,8 @@
 'use client';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { dismissActivity, dismissInvite, dismissLog, markActivitySeen, markInviteSeen, markLogSeen } from '@/lib/data';
+import {
+  MAX_REMINDER_IDS, dismissActivity, dismissInvite, dismissLog, markActivitySeen, markInviteSeen, markLogSeen, saveReminderState, watchReminderState,
+} from '@/lib/data';
 import { addDays, dueLabel, fromKey, timeRange, todayKey } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
 import { roleLabel } from '@/lib/permissions';
@@ -21,20 +23,32 @@ const PANEL_MAX = 8;
 //               changed / deleted, a rename, someone joining or leaving… (also stored in Firestore; see ACT)
 //  • due      — one of my open tasks is due today
 //  • overdue  — an open task is past its date (last 30 days)
-// Reminders are worked out from the tasks; their read / cleared state is kept in this browser.
+// Reminders are worked out from the tasks; their read / cleared state is saved to my account, so every device agrees.
 // ---------------------------------------------------------------------------
 export function useNotifications({ invites, activity = [], log = [], me = null, lists, tasksByList, uid, openListId = null }) {
   const toast = useToast();
-  const storeKey = `notifications:${uid}`;
   const [local, setLocal] = useState({ read: [], gone: [] });
-  useEffect(() => {
-    try { setLocal(JSON.parse(localStorage.getItem(storeKey)) || { read: [], gone: [] }); } catch {}
-  }, [storeKey]);
-  const saveLocal = (fn) => setLocal((prev) => {
-    const next = fn(prev);
-    try { localStorage.setItem(storeKey, JSON.stringify(next)); } catch {}
-    return next;
-  });
+  useEffect(() => watchReminderState(uid, (saved) => {
+    if (saved) return setLocal({ read: saved.read || [], gone: saved.gone || [] });
+    // nothing on the account yet: bring over what this browser kept before reminders synced, once
+    const oldKey = `notifications:${uid}`;
+    let old = null;
+    try { old = JSON.parse(localStorage.getItem(oldKey)); } catch {}
+    if (old && (old.read?.length || old.gone?.length)) {
+      const next = { read: (old.read || []).slice(-MAX_REMINDER_IDS), gone: (old.gone || []).slice(-MAX_REMINDER_IDS) };
+      setLocal(next);
+      saveReminderState(uid, next).then(() => { try { localStorage.removeItem(oldKey); } catch {} }).catch(() => {});
+    } else {
+      setLocal({ read: [], gone: [] });
+    }
+  }), [uid]);
+  // shows straight away; the account copy (and every other device) follows a moment later
+  const saveLocal = (fn) => {
+    const next = fn(local);
+    const capped = { read: next.read.slice(-MAX_REMINDER_IDS), gone: next.gone.slice(-MAX_REMINDER_IDS) };
+    setLocal(capped);
+    saveReminderState(uid, capped).catch(fail);
+  };
 
   const today = todayKey();
   const items = useMemo(() => {
@@ -120,21 +134,32 @@ export function useNotifications({ invites, activity = [], log = [], me = null, 
     if (n.kind === 'share') markInviteSeen(n.inviteId, on).catch(fail);
     else if (n.activityId) markActivitySeen(n.activityId, on).catch(fail);
     else if (n.logId) markLogSeen(uid, n.logId, on).catch(fail);
-    else saveLocal((p) => ({ ...p, read: on ? [...new Set([...p.read, n.id])].slice(-500) : p.read.filter((x) => x !== n.id) }));
+    else saveLocal((p) => ({ ...p, read: on ? [...new Set([...p.read, n.id])] : p.read.filter((x) => x !== n.id) }));
   };
   const dismiss = (n) => {
     if (n.kind === 'share') dismissInvite(n.inviteId).catch(fail);
     else if (n.activityId) dismissActivity(n.activityId).catch(fail);
     else if (n.logId) dismissLog(uid, n.logId).catch(fail);
-    else saveLocal((p) => ({ read: p.read.filter((x) => x !== n.id), gone: [...new Set([...p.gone, n.id])].slice(-500) }));
+    else saveLocal((p) => ({ read: p.read.filter((x) => x !== n.id), gone: [...new Set([...p.gone, n.id])] }));
   };
   const markAllRead = () => {
     const unread = items.filter((n) => !n.read);
-    unread.filter((n) => n.kind === 'share').forEach((n) => markInviteSeen(n.inviteId, true).catch(fail));
-    unread.filter((n) => n.activityId).forEach((n) => markActivitySeen(n.activityId, true).catch(fail));
-    unread.filter((n) => n.logId).forEach((n) => markLogSeen(uid, n.logId, true).catch(fail));
+    const writes = [
+      ...unread.filter((n) => n.kind === 'share').map((n) => markInviteSeen(n.inviteId, true)),
+      ...unread.filter((n) => n.activityId).map((n) => markActivitySeen(n.activityId, true)),
+      ...unread.filter((n) => n.logId).map((n) => markLogSeen(uid, n.logId, true)),
+    ];
     const ids = unread.filter((n) => REMINDER.has(n.kind)).map((n) => n.id);
-    if (ids.length) saveLocal((p) => ({ ...p, read: [...new Set([...p.read, ...ids])].slice(-500) }));
+    if (ids.length) {
+      const next = { ...local, read: [...new Set([...local.read, ...ids])].slice(-MAX_REMINDER_IDS) };
+      setLocal(next);
+      writes.push(saveReminderState(uid, next));
+    }
+    // one message however many didn't go through
+    Promise.allSettled(writes).then((r) => {
+      const failed = r.filter((x) => x.status === 'rejected');
+      if (failed.length) toast(`Couldn't mark ${failed.length} notification${failed.length > 1 ? 's' : ''} as read: ${friendlyError(failed[0].reason)}`, 'err');
+    });
   };
 
   return { items, unread: items.filter((n) => !n.read).length, setRead, dismiss, markAllRead };
@@ -314,7 +339,7 @@ export default function Notifications({ api, user, onOpen, onViewAll }) {
                   <h3 className="np-g">{g.label}</h3>
                   {g.items.map((n) => (
                     <div key={n.id} className={n.read ? 'np-row' : 'np-row unread'} role="button" tabIndex={0}
-                      onClick={() => go(n)} onKeyDown={(e) => (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go(n))}>
+                      onClick={() => go(n)} onKeyDown={(e) => e.target === e.currentTarget && (e.key === 'Enter' || e.key === ' ') && (e.preventDefault(), go(n))}>
                       <KindIcon n={n} />
                       <div className="np-row-b">
                         <p className="np-row-t"><Headline n={n} /></p>
