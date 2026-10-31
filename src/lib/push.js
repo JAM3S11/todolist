@@ -33,7 +33,7 @@ export async function pushState() {
 }
 
 async function token() {
-  const reg = await navigator.serviceWorker.register('/push-sw.js');
+  const reg = await navigator.serviceWorker.register('/push-sw.js', { updateViaCache: 'none' });
   await navigator.serviceWorker.ready;
   return getToken(getMessaging(fb().app), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
 }
