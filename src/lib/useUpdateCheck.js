@@ -30,8 +30,8 @@ async function notifyDevice(id) {
     await reg?.showNotification('Shared To-Do updated', {
       body: 'Tap to get the latest version.',
       tag: 'app-update',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
+      icon: '/icons/emblem-192.png',
+      badge: '/icons/badge-72.png',
       data: { link: '/' },
     });
   } catch {}

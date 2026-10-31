@@ -270,6 +270,49 @@ Firebase Hosting works too, but Vercel is the simplest option for Next.js.
 
 ---
 
+## Desktop notifications
+
+When someone else does something on a list you're on, you can get a notification on your computer or
+phone (a Windows toast, a macOS banner, Android's notification bar), even with the app's tab closed.
+You're never notified about your own changes. While the app is open in front of you, you get the in-app
+toast instead, so nothing shows twice (unless you turn on **Also while I'm using the app**).
+
+**How it works**
+
+- Turning them on (Notifications → **Settings** → **Device notifications**, or **Turn on** in the bell's
+  banner) asks the browser for permission and saves this device's Firebase Cloud Messaging token to
+  `pushTokens/{token}`. The browser only asks after that click, never on page load.
+- After a change that notifies people, the app calls `/api/push` with the ids of the notifications it just
+  wrote (`activity/{id}`, `invites/{id}`). The server checks your ID token, claims each one so it's sent
+  only once, and sends only notifications **you** created in the last two minutes. Who receives what is
+  decided when the notification is written, by the security rules (for example, comments only go to people
+  with Comment only or Read & write access, and the owner).
+- It respects each person's choices in **Notification settings**, sends at most one per sender, list and
+  person every 10 seconds, and forgets devices that have gone away.
+- `public/push-sw.js` shows the notification (the emblem as its icon, the list as its title) and opens
+  that list when it's clicked.
+
+**Setup**
+
+1. **VAPID key:** Firebase console → ⚙ Project settings → **Cloud Messaging** → **Web Push certificates** →
+   **Generate key pair**. Copy the key into `NEXT_PUBLIC_FIREBASE_VAPID_KEY`.
+2. **Service account (server only):** Project settings → **Service accounts** → **Generate new private key**.
+   Paste the whole downloaded JSON file as the value of `FIREBASE_SERVICE_ACCOUNT`. Never commit it.
+3. On Vercel: **Settings → Environment Variables**, add both, then **Redeploy**. The project needs Node 22
+   or newer (`package.json` pins 24.x).
+4. Publish the rules: `npm run deploy:rules`.
+
+**Testing**
+
+- Notifications → **Settings** → turn on **Device notifications** → **Send a test notification**. If it
+  doesn't arrive, the message says what's wrong (for example a missing or invalid service account).
+- For the real thing, use a second account: share a list with it, then close its tab and add a comment from
+  the first account. The second account's computer shows the notification; clicking it opens the list.
+- On iPhone and iPad, notifications only work from the app added to the Home Screen.
+- If notifications are blocked: click the padlock in the address bar → **Notifications** → **Allow**.
+
+---
+
 ## Troubleshooting
 
 | Problem | Fix |

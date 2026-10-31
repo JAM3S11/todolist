@@ -43,13 +43,14 @@ import Loading from './Loading';
 import Music from './Music';
 import MusicPlayer from './MusicPlayer';
 import { ToastProvider, useToast } from './Toast';
-import UpdateBanner from './UpdateBanner';
+import { UpdateProvider } from './UpdateBanner';
 
 export default function Workspace(props) {
   return (
     <ToastProvider>
-      <WorkspaceInner {...props} />
-      <UpdateBanner />
+      <UpdateProvider>
+        <WorkspaceInner {...props} />
+      </UpdateProvider>
     </ToastProvider>
   );
 }

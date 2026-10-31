@@ -95,7 +95,12 @@ export default function ListView({ list, role, user, contacts, onLeave, onDelete
     // removing the date also removes its time
     onDue: (due) => run(updateTask(list, t, user, due ? { due } : { due: null, start: null, mins: null }),
       due ? `Due ${dueLabel(due).toLowerCase()}` : 'Due date removed'),
-    onArchive: () => run(updateTask(list, t, user, { archived: !t.archived }), t.archived ? 'Task restored' : 'Task archived'),
+    // with Undo, which puts it straight back
+    onArchive: () => run(updateTask(list, t, user, { archived: !t.archived }), {
+      title: t.archived ? 'Task restored' : 'Task archived',
+      description: `“${t.text}”`,
+      action: { label: 'Undo', onClick: () => run(updateTask(list, t, user, { archived: !!t.archived })) },
+    }),
     onDelete: () => run(deleteTask(list, t, user), 'Task deleted'),
     onAddLink: (link) => run(addTaskLink(list, t, user, link), 'Link added'),
     onRemoveLink: (link) => run(removeTaskLink(list, t, user, link), 'Link removed'),

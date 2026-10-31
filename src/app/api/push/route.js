@@ -2,13 +2,15 @@
 // The app calls this right after saving a change that wrote notifications (activity/{id}, invites/{id}).
 // It only pushes notifications the caller just created themselves, each one once, to the devices of
 // the person it's for. Needs FIREBASE_SERVICE_ACCOUNT (the service-account JSON) set on the server.
-import { pushMessage, wantsPush } from '@/lib/activityText';
+import { createHash } from 'node:crypto';
+import { notifyGroup, pushMessage, wantsPush } from '@/lib/activityText';
 import { admin, caller as whoIs, DEAD_TOKEN } from '@/lib/pushAdmin';
 
 export const runtime = 'nodejs';
 
 const MAX_IDS = 50;
 const FRESH_MS = 2 * 60 * 1000; // only notifications made in the last 2 minutes
+const RATE_MS = 10 * 1000; // at most one device notification per sender, per list, per person every 10 seconds
 
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x && x.length < 1500) : []);
 
@@ -68,10 +70,24 @@ export async function POST(req) {
     const wanted = [];
     for (const t of tokens.docs) if (wantsPush(await prefsOf(t.data().uid), kind)) wanted.push(t.id);
     if (!wanted.length) continue;
+    // rate limit (pushRate/* is only used here: the rules give the app no access to it)
+    const rateRef = a.db.collection('pushRate').doc(createHash('sha1').update(`${myEmail}|${doc.listId}|${doc.to}`).digest('hex'));
+    const allowed = await a.db.runTransaction(async (tx) => {
+      const r = await tx.get(rateRef);
+      if (r.exists && Date.now() - (r.data().at || 0) < RATE_MS) return false;
+      tx.set(rateRef, { at: Date.now() });
+      return true;
+    }).catch(() => true);
+    if (!allowed) continue;
     const list = wanted;
+    const group = notifyGroup(kind);
     const res = await a.messaging.sendEachForMulticast({
       tokens: list,
-      data: { title: msg.title, body: msg.body, link: `${origin}/?list=${doc.listId}`, tag: `list-${doc.listId}` },
+      // repeated ones of the same type on one list replace each other; only comments alert again
+      data: {
+        title: msg.title, body: msg.body, link: `${origin}/?list=${doc.listId}`,
+        tag: `list-${doc.listId}-${group}`, renotify: group === 'comments' ? '1' : '',
+      },
       webpush: { headers: { Urgency: 'high', TTL: String(24 * 3600) } },
     }).catch(() => null);
     if (!res) continue;
