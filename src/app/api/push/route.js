@@ -2,7 +2,6 @@
 // The app calls this right after saving a change that wrote notifications (activity/{id}, invites/{id}).
 // It only pushes notifications the caller just created themselves, each one once, to the devices of
 // the person it's for. Needs FIREBASE_SERVICE_ACCOUNT (the service-account JSON) set on the server.
-import { FieldValue } from 'firebase-admin/firestore';
 import { pushMessage, wantsPush } from '@/lib/activityText';
 import { admin, caller as whoIs, DEAD_TOKEN } from '@/lib/pushAdmin';
 
@@ -14,7 +13,7 @@ const FRESH_MS = 2 * 60 * 1000; // only notifications made in the last 2 minutes
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x && x.length < 1500) : []);
 
 export async function POST(req) {
-  const a = admin();
+  const a = await admin();
   if (a.error) return Response.json({ error: a.error }, { status: 503 });
 
   // who's asking
@@ -44,7 +43,7 @@ export async function POST(req) {
       const d = snap.data();
       const made = d.createdAt?.toMillis?.() ?? 0;
       if (d.fromEmail !== myEmail || d.pushedAt || Date.now() - made > FRESH_MS) return null;
-      tx.update(ref, { pushedAt: FieldValue.serverTimestamp() });
+      tx.update(ref, { pushedAt: a.FieldValue.serverTimestamp() });
       return d;
     }).catch(() => null);
     if (doc) claimed.push({ col, doc });

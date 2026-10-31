@@ -5,7 +5,7 @@ import { admin, caller, DEAD_TOKEN } from '@/lib/pushAdmin';
 export const runtime = 'nodejs';
 
 export async function POST(req) {
-  const a = admin();
+  const a = await admin();
   if (a.error) return Response.json({ error: a.error }, { status: 503 });
   const me = await caller(a, req);
   if (!me) return Response.json({ error: 'Sign in first.' }, { status: 401 });
