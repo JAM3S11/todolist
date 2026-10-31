@@ -5,7 +5,7 @@ import { useToast } from './Toast';
 
 const DISMISS = 'pushPromptDismissed';
 
-function usePush(user) {
+export function usePush(user) {
   const toast = useToast();
   const [state, setState] = useState(null); // null while checking
   const [busy, setBusy] = useState(false);
@@ -37,27 +37,6 @@ const BellIcon = () => (
     <rect x="6" y="2" width="12" height="20" rx="2.5" /><path d="M11 18h2" />
   </svg>
 );
-
-// On the Notifications page: device notifications on or off for this device, and why not when they can't be
-export default function DevicePush({ user }) {
-  const { state, busy, on, off } = usePush(user);
-  if (!state || state === 'unsupported' || state === 'not-set-up') return null;
-  if (state === 'ios-needs-home-screen') {
-    return <span className="push-note">To get notifications on this iPhone, tap Share → <b>Add to Home Screen</b>, then open the app from there.</span>;
-  }
-  if (state === 'blocked') {
-    return <span className="push-note">Device notifications are blocked. Allow notifications for this site in your browser settings.</span>;
-  }
-  return state === 'on' ? (
-    <button className="btn" type="button" onClick={off} disabled={busy} title="Stop notifications on this device">
-      <BellIcon /><span>On for this device · Turn off</span>
-    </button>
-  ) : (
-    <button className="btn primary" type="button" onClick={on} disabled={busy}>
-      <BellIcon /><span>{busy ? 'Turning on…' : 'Turn on device notifications'}</span>
-    </button>
-  );
-}
 
 // At the bottom of the bell's panel, until they're on (or the person says not now)
 export function PushPrompt({ user }) {

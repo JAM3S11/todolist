@@ -7,7 +7,8 @@ import { roleLabel } from '@/lib/permissions';
 import { ACT, didText, isComment, toastText, who } from '@/lib/activityText';
 import { Avatar, colorFor, toDate } from '@/lib/people';
 import { useToast } from './Toast';
-import DevicePush, { PushPrompt } from './DevicePush';
+import { PushPrompt } from './DevicePush';
+import NotifySettings from './NotifySettings';
 
 const OVERDUE_DAYS = 30; // older overdue tasks stop showing up as reminders
 const PANEL_MAX = 8;
@@ -377,6 +378,7 @@ const FILTERS = {
 export function NotificationsPage({ api, user, onOpen }) {
   const [filter, setFilter] = useState('all');
   const [query, setQuery] = useState('');
+  const [settings, setSettings] = useState(false);
   const { items, unread } = api;
   const q = query.trim().toLowerCase();
   const text = (n) => `${n.listTitle} ${n.task?.text || ''} ${n.text || ''} ${n.detail || ''} ${n.from?.displayName || ''} ${n.from?.email || ''}`.toLowerCase();
@@ -398,7 +400,10 @@ export function NotificationsPage({ api, user, onOpen }) {
           <div className="meta">{unread ? `${unread} unread` : 'All caught up'} · shares, changes, comments and task reminders</div>
         </div>
         <div className="bar-right">
-          <DevicePush user={user} />
+          <button className="btn" type="button" onClick={() => setSettings(true)} title="Notification settings">
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 6h10M18 6h2M4 12h4M12 12h8M4 18h12M20 18h0" /><circle cx="16" cy="6" r="2" /><circle cx="10" cy="12" r="2" /><circle cx="18" cy="18" r="2" /></svg>
+            <span>Settings</span>
+          </button>
           <button className="btn" type="button" onClick={api.markAllRead} disabled={!unread}>
             <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M18 6 7 17l-5-5M22 10l-7.5 7.5L13 16" /></svg>
             <span className="ntp-mark-l">Mark all as read</span><span className="ntp-mark-s">Read all</span>
@@ -463,6 +468,7 @@ export function NotificationsPage({ api, user, onOpen }) {
         )}
       </div>
       </div>
+      {settings && <NotifySettings user={user} onClose={() => setSettings(false)} />}
     </div>
   );
 }

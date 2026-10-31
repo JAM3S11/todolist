@@ -6,7 +6,7 @@ import { cert, getApps, initializeApp } from 'firebase-admin/app';
 import { getAuth } from 'firebase-admin/auth';
 import { FieldValue, getFirestore } from 'firebase-admin/firestore';
 import { getMessaging } from 'firebase-admin/messaging';
-import { pushMessage } from '@/lib/activityText';
+import { pushMessage, wantsPush } from '@/lib/activityText';
 
 export const runtime = 'nodejs';
 
@@ -70,12 +70,23 @@ export async function POST(req) {
   // clicking it opens the app where it was used (the live site, or localhost while trying it out)
   const origin = new URL(req.url).origin;
   let sent = 0;
+  // each person's Notification settings (users/{uid}.notify), read once per request
+  const prefs = new Map();
+  const prefsOf = async (uid) => {
+    if (!prefs.has(uid)) prefs.set(uid, await a.db.collection('users').doc(uid).get().then((s) => s.data()?.notify || {}).catch(() => ({})));
+    return prefs.get(uid);
+  };
   for (const { col, doc } of claimed) {
-    const msg = pushMessage(doc, col === 'invites' ? 'share' : doc.kind);
+    const kind = col === 'invites' ? 'share' : doc.kind;
+    const msg = pushMessage(doc, kind);
     if (!msg) continue;
     const tokens = await a.db.collection('pushTokens').where('email', '==', doc.to).get();
     if (tokens.empty) continue;
-    const list = tokens.docs.map((t) => t.id);
+    // only the devices of people who still want this kind of notification
+    const wanted = [];
+    for (const t of tokens.docs) if (wantsPush(await prefsOf(t.data().uid), kind)) wanted.push(t.id);
+    if (!wanted.length) continue;
+    const list = wanted;
     const res = await a.messaging.sendEachForMulticast({
       tokens: list,
       data: { title: msg.title, body: msg.body, link: `${origin}/?list=${doc.listId}`, tag: `list-${doc.listId}` },

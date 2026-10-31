@@ -71,6 +71,26 @@ export function toastText(n) {
 
 // A device notification: the list as the title, what happened as the body.
 // doc: an activity/{id} or invites/{id} document as stored in Firestore.
+// What device notifications can be turned on or off for (Notification settings). All on until changed.
+export const NOTIFY_GROUPS = [
+  { key: 'share', label: 'Shared with me', hint: 'A list or love letter is shared with you' },
+  { key: 'tasks', label: 'Tasks', hint: 'Added, done, renamed, dates, details, links, archived or deleted' },
+  { key: 'comments', label: 'Comments', hint: 'New, edited or deleted comments' },
+  { key: 'members', label: 'People & access', hint: 'Someone joins or leaves, or your access changes' },
+  { key: 'lists', label: 'List & letter changes', hint: 'Created, renamed, archived, deleted, or written in' },
+  { key: 'music', label: 'Music', hint: 'Songs added, removed or played' },
+];
+export function notifyGroup(kind) {
+  if (kind === 'share') return 'share';
+  if (isComment({ kind })) return 'comments';
+  if (kind.startsWith('task-')) return 'tasks';
+  if (kind.startsWith('member-') || kind.startsWith('access-')) return 'members';
+  if (kind.startsWith('music-')) return 'music';
+  return 'lists';
+}
+// prefs: users/{uid}.notify, e.g. { comments: false }
+export const wantsPush = (prefs, kind) => (prefs || {})[notifyGroup(kind)] !== false;
+
 export function pushMessage(doc, kind = doc.kind || 'share') {
   const n = {
     kind, listTitle: doc.listTitle, letter: !!doc.letter, text: doc.text || '', detail: doc.detail || '',

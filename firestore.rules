@@ -148,7 +148,16 @@ service cloud.firestore {
     match /users/{uid} {
       allow read, delete: if signedIn() && request.auth.uid == uid;
       allow create, update: if signedIn() && request.auth.uid == uid
-        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'listOrder', 'spotify', 'music', 'createdAt', 'updatedAt'])
+        && request.resource.data.keys().hasOnly(['email', 'displayName', 'lastListId', 'favorites', 'listOrder', 'spotify', 'music', 'notify', 'createdAt', 'updatedAt'])
+        // which kinds of device notifications I want: { share, tasks, comments, members, lists, music } → true/false
+        && request.resource.data.get('notify', {}) is map
+        && request.resource.data.get('notify', {}).keys().hasOnly(['share', 'tasks', 'comments', 'members', 'lists', 'music'])
+        && request.resource.data.get('notify', {}).get('share', true) is bool
+        && request.resource.data.get('notify', {}).get('tasks', true) is bool
+        && request.resource.data.get('notify', {}).get('comments', true) is bool
+        && request.resource.data.get('notify', {}).get('members', true) is bool
+        && request.resource.data.get('notify', {}).get('lists', true) is bool
+        && request.resource.data.get('notify', {}).get('music', true) is bool
         && request.resource.data.get('favorites', []) is list
         && request.resource.data.get('favorites', []).size() <= 500
         && request.resource.data.get('listOrder', []) is list

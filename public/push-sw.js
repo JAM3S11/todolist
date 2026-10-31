@@ -6,6 +6,16 @@
 self.addEventListener('install', () => self.skipWaiting());
 self.addEventListener('activate', (event) => event.waitUntil(self.clients.claim()));
 
+// "Also while I'm using the app": the page saves it in Cache Storage, which this worker can read
+async function whileOpen() {
+  try {
+    const res = await (await caches.open('todo-prefs')).match('/__prefs/while-open');
+    return !!res && (await res.text()) === '1';
+  } catch {
+    return false;
+  }
+}
+
 self.addEventListener('push', (event) => {
   let msg = {};
   try {
@@ -17,9 +27,10 @@ self.addEventListener('push', (event) => {
   if (!msg.title) return;
 
   event.waitUntil((async () => {
-    // Someone looking at the app right now already sees it there (a pop-up in the app), so no double alert
+    // Someone looking at the app right now already sees it there (a pop-up in the app), so no double alert,
+    // unless they turned on "Also while I'm using the app" in Notification settings
     const open = await self.clients.matchAll({ type: 'window', includeUncontrolled: true });
-    if (open.some((c) => c.focused && c.visibilityState === 'visible')) return;
+    if (open.some((c) => c.focused && c.visibilityState === 'visible') && !(await whileOpen())) return;
     await self.registration.showNotification(msg.title, {
       body: msg.body || '',
       icon: '/icon-192.png',
