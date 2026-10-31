@@ -38,17 +38,36 @@ async function token() {
   return getToken(getMessaging(fb().app), { vapidKey: VAPID_KEY, serviceWorkerRegistration: reg });
 }
 
-// Ask, then save this device's token. Returns the new state.
+// What went wrong while turning them on, in words (shown in the toast)
+function why(step, e) {
+  const code = e?.code || '';
+  if (code.includes('permission-blocked') || code.includes('permission-default')) return 'Notifications are blocked for this site in the browser settings.';
+  if (code.includes('failed-service-worker-registration')) return "The browser wouldn't start the app's notification helper. Reload the page and try again.";
+  if (code.includes('token-subscribe-failed') || code.includes('token-unsubscribe-failed')) return 'Firebase refused this device (check the VAPID key and that the Firebase Cloud Messaging API is enabled).';
+  if (code === 'permission-denied') return "Couldn't save this device to your account (Firestore rules).";
+  return `Couldn't ${step}${code ? ` (${code})` : ''}. Try again, or try another browser.`;
+}
+
+// Ask, then save this device's token. Returns the new state; throws an Error saying why it failed.
 export async function enablePush(user) {
   const permission = await Notification.requestPermission();
   if (permission !== 'granted') return permission === 'denied' ? 'blocked' : 'off';
-  const t = await token();
-  if (!t) return 'off';
+  let t;
+  try { t = await token(); } catch (e) { throw new Error(why('get a notification address for this device', e)); }
+  if (!t) throw new Error(why('get a notification address for this device'));
   const old = stored();
   if (old && old !== t) await removePushToken(old).catch(() => {});
-  await savePushToken(user, t, deviceName());
+  try { await savePushToken(user, t, deviceName()); } catch (e) { throw new Error(why('save this device', e)); }
   remember(t);
   return 'on';
+}
+
+// "Send a test notification": to every device turned on for my account. Returns how many got it.
+export async function sendTestPush(user) {
+  const res = await fetch('/api/push/test', { method: 'POST', headers: { Authorization: `Bearer ${await user.getIdToken()}` } });
+  const body = await res.json().catch(() => ({}));
+  if (!res.ok || body.error) throw new Error(body.error || `The server couldn't send it (${res.status}).`);
+  return body.sent;
 }
 
 export async function disablePush() {

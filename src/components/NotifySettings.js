@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react';
 import { NOTIFY_GROUPS } from '@/lib/activityText';
 import { saveNotifyPref, watchNotifyPrefs } from '@/lib/data';
 import { friendlyError } from '@/lib/firebase';
+import { sendTestPush } from '@/lib/push';
 import { usePush } from './DevicePush';
 import { useToast } from './Toast';
 
@@ -51,6 +52,7 @@ export default function NotifySettings({ user, onClose }) {
   const push = usePush(user);
   const [prefs, setPrefs] = useState(null);
   const [whileOpen, setWhileOpen] = useState(false);
+  const [testing, setTesting] = useState(false);
   const box = useRef(null);
 
   useEffect(() => watchNotifyPrefs(user.uid, setPrefs), [user.uid]);
@@ -65,6 +67,17 @@ export default function NotifySettings({ user, onClose }) {
   const deviceOn = push.state === 'on';
   const canToggle = push.state === 'on' || push.state === 'off';
   const note = NOTES[push.state];
+
+  async function test() {
+    setTesting(true);
+    try {
+      const sent = await sendTestPush(user);
+      toast(`Test sent to ${sent} device${sent === 1 ? '' : 's'}. Check your notification bar.`);
+    } catch (e) {
+      toast(e.message, 'err');
+    }
+    setTesting(false);
+  }
 
   const setGroup = (key, on) => {
     setPrefs((p) => ({ ...p, [key]: on }));
@@ -87,6 +100,12 @@ export default function NotifySettings({ user, onClose }) {
                 onChange={(v) => (v ? push.on() : push.off())} />
             </Row>
             {note && <p className="push-note">{note}</p>}
+            {deviceOn && (
+              <div className="ns-test">
+                <button type="button" className="btn" onClick={test} disabled={testing}>{testing ? 'Sending…' : 'Send a test notification'}</button>
+                <span>Notifications come from other people&apos;s changes, never your own, so this is the way to try it yourself.</span>
+              </div>
+            )}
             <Row title="Also while I'm using the app" hint="Normally a pop-up inside the app is enough while you're looking at it.">
               <Switch on={whileOpen} disabled={!deviceOn} label="Also while I'm using the app"
                 onChange={(v) => { setWhileOpen(v); saveWhileOpen(v); }} />

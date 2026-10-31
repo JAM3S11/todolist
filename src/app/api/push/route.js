@@ -2,41 +2,24 @@
 // The app calls this right after saving a change that wrote notifications (activity/{id}, invites/{id}).
 // It only pushes notifications the caller just created themselves, each one once, to the devices of
 // the person it's for. Needs FIREBASE_SERVICE_ACCOUNT (the service-account JSON) set on the server.
-import { cert, getApps, initializeApp } from 'firebase-admin/app';
-import { getAuth } from 'firebase-admin/auth';
-import { FieldValue, getFirestore } from 'firebase-admin/firestore';
-import { getMessaging } from 'firebase-admin/messaging';
+import { FieldValue } from 'firebase-admin/firestore';
 import { pushMessage, wantsPush } from '@/lib/activityText';
+import { admin, caller as whoIs, DEAD_TOKEN } from '@/lib/pushAdmin';
 
 export const runtime = 'nodejs';
 
 const MAX_IDS = 50;
 const FRESH_MS = 2 * 60 * 1000; // only notifications made in the last 2 minutes
-const DEAD_TOKEN = new Set(['messaging/registration-token-not-registered', 'messaging/invalid-registration-token', 'messaging/invalid-argument']);
-
-function admin() {
-  if (!getApps().length) {
-    const raw = process.env.FIREBASE_SERVICE_ACCOUNT;
-    if (!raw) return null;
-    initializeApp({ credential: cert(JSON.parse(raw)) });
-  }
-  return { auth: getAuth(), db: getFirestore(), messaging: getMessaging() };
-}
 
 const ids = (v) => (Array.isArray(v) ? v.filter((x) => typeof x === 'string' && x && x.length < 1500) : []);
 
 export async function POST(req) {
   const a = admin();
-  if (!a) return Response.json({ error: 'Device notifications are not set up on the server.' }, { status: 503 });
+  if (a.error) return Response.json({ error: a.error }, { status: 503 });
 
   // who's asking
-  const bearer = (req.headers.get('authorization') || '').replace(/^Bearer\s+/i, '');
-  let caller;
-  try {
-    caller = await a.auth.verifyIdToken(bearer);
-  } catch {
-    return Response.json({ error: 'Sign in first.' }, { status: 401 });
-  }
+  const caller = await whoIs(a, req);
+  if (!caller) return Response.json({ error: 'Sign in first.' }, { status: 401 });
   const myEmail = (caller.email || '').toLowerCase();
   if (!myEmail) return Response.json({ error: 'Sign in with an email address.' }, { status: 401 });
 
