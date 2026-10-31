@@ -4,7 +4,7 @@ import { NOTIFY_GROUPS } from '@/lib/activityText';
 import { saveNotifyPref, watchNotifyPrefs } from '@/lib/data';
 import { friendlyError } from '@/lib/firebase';
 import { sendTestPush } from '@/lib/push';
-import { usePush } from './DevicePush';
+import { BLOCKED_HELP, usePush } from './DevicePush';
 import { useToast } from './Toast';
 
 // "Also while I'm using the app": kept where the service worker can read it (it decides what to show)
@@ -41,7 +41,7 @@ function Row({ title, hint, children }) {
 
 const NOTES = {
   'ios-needs-home-screen': 'On iPhone and iPad, tap Share → Add to Home Screen, then open the app from there to turn these on.',
-  blocked: 'Notifications are blocked for this site. Allow them in your browser or phone settings, then come back here.',
+  blocked: BLOCKED_HELP,
   unsupported: "This browser can't show device notifications. Try Chrome, Edge, Firefox or Safari.",
   'not-set-up': "Device notifications aren't set up for this app yet.",
 };

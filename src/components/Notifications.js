@@ -6,11 +6,12 @@ import {
 import { addDays, dueLabel, fromKey, timeRange, todayKey } from '@/lib/dates';
 import { friendlyError } from '@/lib/firebase';
 import { roleLabel } from '@/lib/permissions';
-import { ACT, didText, isComment, toastText, who } from '@/lib/activityText';
+import { ACT, didText, isComment, notifyCopy, who } from '@/lib/activityText';
 import { Avatar, colorFor, toDate } from '@/lib/people';
 import { useToast } from './Toast';
 import { PushPrompt } from './DevicePush';
 import NotifySettings from './NotifySettings';
+import { UpdateCard, useUpdate } from './UpdateBanner';
 
 const OVERDUE_DAYS = 30; // older overdue tasks stop showing up as reminders
 const PANEL_MAX = 8;
@@ -122,8 +123,12 @@ export function useNotifications({ invites, activity = [], log = [], me = null, 
     const live = items.filter((n) => !n.self && (n.kind === 'share' || ACT[n.kind]));
     if (known.current) {
       const fresh = live.filter((n) => !n.read && !known.current.has(n.id) && !(n.kind !== 'share' && n.listId === openListId));
-      if (fresh.length === 1) toast(toastText(fresh[0]));
-      else if (fresh.length > 1) toast(`${fresh.length} new notifications`);
+      if (fresh.length === 1) {
+        const c = notifyCopy(fresh[0]);
+        if (c) toast({ title: c.title, description: c.body, kind: 'info' });
+      } else if (fresh.length > 1) {
+        toast({ title: `${fresh.length} new notifications`, description: 'Open the bell to see them.', kind: 'info' });
+      }
     }
     known.current = new Set(live.map((n) => n.id));
   }, [items, lists, toast, openListId]);
@@ -285,7 +290,9 @@ export default function Notifications({ api, user, onOpen, onViewAll }) {
   const [open, setOpen] = useState(false);
   const [tab, setTab] = useState('all');
   const box = useRef(null);
-  const { items, unread } = api;
+  const { items } = api;
+  const upd = useUpdate();
+  const unread = api.unread + (upd.ready ? 1 : 0); // a waiting update counts as one more
   const shown = (tab === 'unread' ? items.filter((n) => !n.read) : items).slice(0, PANEL_MAX);
 
   useEffect(() => {
@@ -320,10 +327,10 @@ export default function Notifications({ api, user, onOpen, onViewAll }) {
               <h2>Notifications</h2>
               {unread > 0 && <span className="np-count">{unread} new</span>}
             </div>
-            <button type="button" className="link small" onClick={api.markAllRead} disabled={!unread}>Mark all as read</button>
+            <button type="button" className="link small" onClick={api.markAllRead} disabled={!api.unread}>Mark all as read</button>
           </div>
           <div className="np-tabs" role="tablist">
-            {[['all', 'All', items.length], ['unread', 'Unread', unread]].map(([k, label, n]) => (
+            {[['all', 'All', items.length], ['unread', 'Unread', api.unread]].map(([k, label, n]) => (
               <button key={k} type="button" role="tab" aria-selected={tab === k} className={tab === k ? 'on' : ''} onClick={() => setTab(k)}>
                 {label}<span>{n}</span>
               </button>
@@ -331,6 +338,7 @@ export default function Notifications({ api, user, onOpen, onViewAll }) {
           </div>
 
           <div className="np-body">
+            <UpdateCard compact />
             {shown.length === 0 ? (
               <Empty unreadOnly={tab === 'unread'} compact />
             ) : (
@@ -358,7 +366,7 @@ export default function Notifications({ api, user, onOpen, onViewAll }) {
             )}
           </div>
 
-          <PushPrompt user={user} />
+          <PushPrompt user={user} ready={items.some((n) => !n.self && (n.kind === 'share' || isComment(n)))} />
           <button type="button" className="np-f" onClick={() => { setOpen(false); onViewAll(); }}>
             View all notifications
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6" /></svg>
@@ -461,6 +469,7 @@ export function NotificationsPage({ api, user, onOpen }) {
 
       <div className="page-body">
       <div className="ntp-list">
+        <UpdateCard />
         {shown.length === 0 ? (
           <Empty unreadOnly={filter === 'unread' && !q} filtered={filter !== 'all' || !!q} />
         ) : (

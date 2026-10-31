@@ -3,7 +3,9 @@ import { useEffect, useState } from 'react';
 import { disablePush, enablePush, pushState } from '@/lib/push';
 import { useToast } from './Toast';
 
-const DISMISS = 'pushPromptDismissed';
+const DISMISS = 'pushPromptNotNow'; // when "Not now" was pressed; asked again after 14 days
+const NOT_NOW_MS = 14 * 24 * 3600 * 1000;
+export const BLOCKED_HELP = 'Notifications are blocked for this site. To allow them, click the padlock in the address bar → Notifications → Allow, then reload.';
 
 export function usePush(user) {
   const toast = useToast();
@@ -17,7 +19,7 @@ export function usePush(user) {
       const next = await fn();
       setState(next);
       if (next === 'on' && ok) toast(ok);
-      if (next === 'blocked') toast('Notifications are blocked for this site. Allow them in your browser settings.', 'err');
+      if (next === 'blocked') toast({ title: 'Notifications are blocked', description: BLOCKED_HELP.replace(/^[^.]*\. /, ''), kind: 'err' });
     } catch (e) {
       toast(e?.message || "Couldn't turn device notifications on here. Try again, or try another browser.", 'err');
       setState(await pushState());
@@ -38,18 +40,22 @@ const BellIcon = () => (
   </svg>
 );
 
-// At the bottom of the bell's panel, until they're on (or the person says not now)
-export function PushPrompt({ user }) {
+// A small banner offering device notifications. Never on page load by itself: only once there's been a
+// list shared with me or a comment (ready), and the browser is only asked from the Turn on click.
+// "Not now" hides it for 14 days.
+export function PushPrompt({ user, ready = true }) {
   const { state, busy, on } = usePush(user);
-  const [hidden, setHidden] = useState(() => { try { return localStorage.getItem(DISMISS) === '1'; } catch { return false; } });
-  if (hidden || state !== 'off') return null;
-  const notNow = () => { setHidden(true); try { localStorage.setItem(DISMISS, '1'); } catch {} };
+  const [hidden, setHidden] = useState(() => {
+    try { return Date.now() - Number(localStorage.getItem(DISMISS) || 0) < NOT_NOW_MS; } catch { return false; }
+  });
+  if (!ready || hidden || state !== 'off') return null;
+  const notNow = () => { setHidden(true); try { localStorage.setItem(DISMISS, String(Date.now())); } catch {} };
   return (
-    <div className="push-prompt">
+    <div className="push-prompt" role="region" aria-label="Desktop alerts">
       <BellIcon />
-      <span>Get these on your phone or computer, even with the app closed.</span>
-      <button type="button" className="link small" onClick={on} disabled={busy}>Turn on</button>
-      <button type="button" className="ic tiny" onClick={notNow} aria-label="Not now">✕</button>
+      <span>Get a desktop alert when someone comments or shares a list with you.</span>
+      <button type="button" className="btn primary push-on" onClick={on} disabled={busy}>{busy ? 'Turning on…' : 'Turn on'}</button>
+      <button type="button" className="btn push-later" onClick={notNow}>Not now</button>
     </div>
   );
 }

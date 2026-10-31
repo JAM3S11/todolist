@@ -61,16 +61,6 @@ export const didText = (n) => ((n.self && ACT[n.kind].mine) || ACT[n.kind].did)(
 export const isComment = (n) => ACT[n.kind]?.group === 'comments';
 export const who = (n) => (n.self ? 'You' : n.from.displayName || n.from.email);
 export const where = (n) => (n.letter ? `the love letter “${n.listTitle}”` : `“${n.listTitle}”`);
-const short = (t) => (t.length > 60 ? `${t.slice(0, 60)}…` : t);
-
-// One line: "Amani completed “Pack boxes” in “Moving house”"
-export function toastText(n) {
-  if (n.kind === 'share') return `${who(n)} ${n.letter ? 'sent you a love letter' : `shared “${n.listTitle}” with you`}`;
-  return `${who(n)} ${didText(n)}${ACT[n.kind].noList ? '' : ` ${where(n)}`}${n.kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}`;
-}
-
-// A device notification: the list as the title, what happened as the body.
-// doc: an activity/{id} or invites/{id} document as stored in Firestore.
 // What device notifications can be turned on or off for (Notification settings). All on until changed.
 export const NOTIFY_GROUPS = [
   { key: 'share', label: 'Shared with me', hint: 'A list or love letter is shared with you' },
@@ -91,15 +81,43 @@ export function notifyGroup(kind) {
 // prefs: users/{uid}.notify, e.g. { comments: false }
 export const wantsPush = (prefs, kind) => (prefs || {})[notifyGroup(kind)] !== false;
 
-export function pushMessage(doc, kind = doc.kind || 'share') {
-  const n = {
-    kind, listTitle: doc.listTitle, letter: !!doc.letter, text: doc.text || '', detail: doc.detail || '',
-    from: { email: doc.fromEmail, displayName: doc.fromName },
-  };
+// ---- how a notification reads on the device (and in the in-app toast) ----
+// The person's first name, then what happened. Title under 50 characters, body under 120, no emoji.
+const fit = (s, max) => { const t = String(s || '').replace(/\s+/g, ' ').trim(); return t.length > max ? `${t.slice(0, max - 1).trimEnd()}…` : t; };
+export const firstName = (from) => (from?.displayName || from?.email || 'Someone').split(/[\s@]/)[0] || 'Someone';
+
+// n: { kind, listTitle, letter, text, detail, role (a share's access level), from: { displayName, email } }
+export function notifyCopy(n) {
+  const kind = n.kind;
   if (kind !== 'share' && !ACT[kind]) return null;
-  const title = n.letter ? `Love letter · ${n.listTitle}` : n.listTitle;
-  if (kind === 'share') return { title, body: toastText(n) };
-  // the list is already the title, so "completed “Pack boxes” in" reads as "completed “Pack boxes”"
-  const did = ACT[kind].did(n).replace(/ (to|in|on|from)$/, '');
-  return { title, body: `${who(n)} ${did}${kind === 'comment' && n.text ? `: “${short(n.text)}”` : ''}` };
+  const name = firstName(n.from);
+  const list = n.listTitle || 'a list';
+  let title;
+  let body;
+  if (kind === 'share') {
+    title = n.letter ? `${name} sent you a love letter` : `${name} shared a list with you`;
+    body = n.role ? `${list} · ${roleLabel(n.role)}` : list;
+  } else if (kind === 'access-changed') {
+    title = 'Your access changed';
+    body = `${list} · ${roleLabel(n.detail)}`;
+  } else if (kind === 'access-removed') {
+    title = 'Access removed';
+    body = `You no longer have access to ${list}`;
+  } else if ((kind === 'comment' || kind === 'comment-edit') && n.text) {
+    title = `Comment on ${list}`;
+    body = `${name}: ${n.text}`;
+  } else {
+    // the list is the title, so "completed “Pack boxes” in" reads as "completed “Pack boxes”"
+    title = ACT[kind].noList ? 'My music' : list;
+    body = `${name} ${ACT[kind].did(n).replace(/ (to|in|on|from)$/, '')}`;
+  }
+  return { title: fit(title, 50), body: fit(body, 120) };
+}
+
+// doc: an activity/{id} or invites/{id} document as stored in Firestore (the push sender, on the server)
+export function pushMessage(doc, kind = doc.kind || 'share') {
+  return notifyCopy({
+    kind, listTitle: doc.listTitle, letter: !!doc.letter, text: doc.text || '', detail: doc.detail || '',
+    role: doc.permission || '', from: { email: doc.fromEmail, displayName: doc.fromName },
+  });
 }

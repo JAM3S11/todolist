@@ -33,10 +33,12 @@ self.addEventListener('push', (event) => {
     if (open.some((c) => c.focused && c.visibilityState === 'visible') && !(await whileOpen())) return;
     await self.registration.showNotification(msg.title, {
       body: msg.body || '',
-      icon: '/icon-192.png',
-      badge: '/icon-192.png',
-      tag: msg.tag || undefined, // one per list, so a busy list doesn't pile up alerts
-      renotify: !!msg.tag,
+      icon: '/icons/emblem-192.png', // PNG: Windows doesn't show SVG icons
+      badge: '/icons/badge-72.png', // Android's status bar: white on transparent
+      tag: msg.tag || undefined, // list + type, so repeated ones replace each other instead of stacking
+      renotify: !!msg.tag && msg.renotify === '1', // only comments alert again
+      requireInteraction: false, // goes away by itself
+      silent: false,
       data: { link: msg.link || '/' },
     });
   })());

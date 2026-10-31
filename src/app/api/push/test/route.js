@@ -19,7 +19,7 @@ export async function POST(req) {
   try {
     res = await a.messaging.sendEachForMulticast({
       tokens: list,
-      data: { title: 'Shared To-Do', body: 'Device notifications are working on this device. 🎉', link: `${origin}/`, tag: 'push-test' },
+      data: { title: 'Shared To-Do', body: 'Device notifications are working on this device.', link: `${origin}/`, tag: 'push-test' },
       webpush: { headers: { Urgency: 'high', TTL: '600' } },
     });
   } catch (e) {
